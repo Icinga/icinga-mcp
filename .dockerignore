@@ -1,0 +1,39 @@
+# Reduce build context and keep image lean
+
+# Python artifacts
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+*.egg-info/
+.eggs/
+build/
+dist/
+.pytest_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# Virtual environments
+.venv/
+
+# Local env files (mount at runtime or use --env-file)
+.env
+.env.*
+
+# VCS / CI
+.git/
+.github/
+.gitignore
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+
+# Project folders not needed for the runtime image
+tests/
+docs/
+examples/
+scripts/

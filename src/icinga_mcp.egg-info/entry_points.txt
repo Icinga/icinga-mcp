@@ -1,0 +1,4 @@
+[console_scripts]
+icinga-mcp-health = icinga_mcp.cli:health
+icinga-mcp-rest = icinga_mcp.cli:run_rest
+icinga-mcp-server = icinga_mcp.cli:run_mcp

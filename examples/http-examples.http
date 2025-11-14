@@ -1,0 +1,200 @@
+# HTTP examples for icinga-mcp REST
+# Requires REST server running (default 127.0.0.1:8080 or use REST_PORT)
+# If you launched with: PYTHONPATH=./src uvicorn icinga_mcp.rest_app:app --port 8081
+# then set the host below accordingly.
+
+@host = http://127.0.0.1:8081
+@bearerToken = super-secret
+
+# If REST auth is enabled, add this header to each request:
+# Authorization: Bearer {{bearerToken}}
+
+###
+# Health
+GET {{host}}/health
+Authorization: Bearer {{bearerToken}}
+
+###
+# Hosts
+# List hosts (supports filter, page, limit passed to Icinga DB Web)
+GET {{host}}/hosts
+
+###
+# Hosts (filtered + pagination)
+GET {{host}}/hosts?filter=host.name%20%3D%20%22test.example.com%22&page=1&limit=50
+
+###
+# Services
+# List services (filtered + pagination)
+GET {{host}}/services?filter=service.name%20%3D%20%22Ping%22&page=1&limit=50
+
+###
+# Hostgroups
+GET {{host}}/hostgroups
+
+###
+# Hostgroups filtered by name
+GET {{host}}/hostgroups?name=Berlin
+
+###
+# Servicegroups
+GET {{host}}/servicegroups
+
+###
+# Servicegroups filtered by name
+GET {{host}}/servicegroups?name=Linux
+
+###
+# Comments
+GET {{host}}/comments
+
+###
+# Add host comment
+# Upstream: /icingadb/host/add-comment?name=test.example.com
+POST {{host}}/comment/host?host=test.example.com
+Content-Type: application/json
+
+{
+  "comment": "Planned maintenance"
+}
+
+###
+# Add service comment
+# Upstream: /icingadb/service/add-comment?name=Ping&host.name=test.example.com
+POST {{host}}/comment/service?service=Ping&host=test.example.com
+Content-Type: application/json
+
+{
+  "comment": "Noted by on-call"
+}
+
+###
+# Remove comment (by name from list)
+POST {{host}}/comment/remove
+Content-Type: application/json
+
+{
+  "name": "test.example.com!f1cd84f1-583e-493f-b42b-86b9e1c6d325"
+}
+
+###
+# Notifications
+# Upstream: /icingadb/notifications
+# List notifications
+GET {{host}}/notifications
+
+###
+# Notifications (summary projection; explicit fields; last day)
+GET {{host}}/notifications?host=test.example.com&timerange=day&summary=true&fields=time,host,service,author,text
+
+###
+# Notifications (last week for a specific service)
+GET {{host}}/notifications?host=test.example.com&service=Ping&timerange=week&summary=true&fields=time,host,service,author,text
+
+###
+# Acknowledgements
+# Acknowledge host (comment-only; flags fixed)
+POST {{host}}/acknowledgement/host?host=test.example.com
+Content-Type: application/json
+
+{
+  "comment": "ich bin dran"
+}
+
+###
+# Acknowledge service (comment-only; flags fixed)
+# Upstream: /icingadb/service/acknowledge?name=Ping&host.name=test.example.com
+POST {{host}}/acknowledgement/service?service=Ping&host=test.example.com
+Content-Type: application/json
+
+{
+  "comment": "ich bin dran"
+}
+
+###
+# Remove host acknowledgement
+# Upstream: /icingadb/host/remove-acknowledgement?name=test.example.com
+POST {{host}}/acknowledgement/host/remove?host=test.example.com
+
+###
+# Remove service acknowledgement
+# Upstream: /icingadb/service/remove-acknowledgement?name=Ping&host.name=test.example.com
+POST {{host}}/acknowledgement/service/remove?service=Ping&host=test.example.com
+
+###
+# Downtimes
+GET {{host}}/downtimes
+
+###
+# Schedule host downtime (window = hour|day|week)
+# Upstream: /icingadb/host/schedule-downtime?name=test.example.com
+POST {{host}}/downtime/host?host=test.example.com
+Content-Type: application/json
+
+{
+  "comment": "nix",
+  "window": "hour"
+}
+
+###
+# Schedule service downtime (window = hour|day|week)
+# Upstream: /icingadb/service/schedule-downtime?name=Ping&host.name=test.example.com
+POST {{host}}/downtime/service?service=Ping&host=test.example.com
+Content-Type: application/json
+
+{
+  "comment": "hurra",
+  "window": "hour"
+}
+
+###
+# Downtimes (summary projection like comments)
+# Use summary=true (default) and control fields
+GET {{host}}/downtimes?host=test.example.com&summary=true&fields=time,host,service,name,author,text,start_time,end_time,is_in_effect
+
+###
+# Remove downtime (by name from list)
+# Upstream: /icingadb/downtimes/delete?downtime.name=test.example.com%21f09a0d5a-52f3-4361-a550-2aeecb1d0a3d
+POST {{host}}/downtime/remove
+Content-Type: application/json
+
+{
+  "name": "test.example.com!f09a0d5a-52f3-4361-a550-2aeecb1d0a3d"
+}
+
+###
+# Check now
+# Host
+# Upstream: /icingadb/host/check-now?name=test.example.com
+POST {{host}}/checknow/host?host=test.example.com
+
+###
+# Service
+# Upstream: /icingadb/service/check-now?name=Ping&host.name=test.example.com
+POST {{host}}/checknow/service?service=Ping&host=test.example.com
+
+###
+# History
+# Host history
+# Mirrors upstream: /icingadb/host/history?name=test.example.com
+GET {{host}}/history/host?host=test.example.com&page=1&limit=50
+
+###
+# Host history (last day)
+# Limits events to the last 24h
+GET {{host}}/history/host?host=test.example.com&timerange=day&page=1&limit=50
+
+###
+# Service history
+# Mirrors upstream: /icingadb/service/history?name=Ping&host.name=test.example.com
+GET {{host}}/history/service?service=Ping&host=test.example.com&page=1&limit=50
+
+###
+# Service history (last week)
+# Limits events to the last 7 days
+GET {{host}}/history/service?service=Ping&host=test.example.com&timerange=week&page=1&limit=50
+
+###
+# Service history (quarter)
+# Limits events to the last ~90 days
+GET {{host}}/history/service?service=Ping&host=test.example.com&timerange=quarter&page=1&limit=50
