@@ -31,7 +31,7 @@ Capabilities:
 - Read/write operations: list hosts/services/problems, groups, history; comments; acknowledgements; downtimes; notifications; on-demand checks.
 - Optional normalization/summary projections for UI/LLM consumption.
 
-References: [src/icinga_mcp/rest_app.py](src/icinga_mcp/rest_app.py:1), [src/icinga_mcp/services.py](src/icinga_mcp/services.py:1), [docs/icinga-web-api.md](docs/icinga-web-api.md:1).
+References: [src/icinga_mcp/rest_app.py](src/icinga_mcp/rest_app.py), [src/icinga_mcp/services.py](src/icinga_mcp/services.py), [docs/icinga-web-api.md](docs/icinga-web-api.md).
 
 ## How it works
 
@@ -93,7 +93,7 @@ make run-mcp
 # or:
 icinga-mcp-server
 ```
-See [docs/mcpo-setup.md](docs/mcpo-setup.md:1) and helpers in [scripts/](scripts).
+See [docs/mcpo-setup.md](docs/mcpo-setup.md) and helpers in [scripts/](scripts).
 
 ## Configuration
 
@@ -123,7 +123,7 @@ Secrets are never logged; TLS verification is on by default. Use a least-privile
   - Use dotted filters like host.name or service.name; convenience params host and service are mapped for you
   - Summary and fields parameters can return compact normalized shapes
 
-Complete, up-to-date route and parameter notes: [docs/icinga-web-api.md](docs/icinga-web-api.md:1). Example requests: [examples/http-examples.http](examples/http-examples.http:1).
+Complete, up-to-date route and parameter notes: [docs/icinga-web-api.md](docs/icinga-web-api.md). Example requests: [examples/http-examples.http](examples/http-examples.http).
 
 Quick examples
 ```bash
@@ -164,7 +164,7 @@ export ICINGA_WEB_BASE_URL="https://monitoring.example.com/icingaweb2"
 
 - Exposes tools analogous to core REST operations for MCPO orchestration (list_hosts, list_services, list_host_problems, list_service_problems, history, comments, downtimes, groups, etc.).
 - Start the server with make run-mcp or the icinga-mcp-server console script, then configure MCPO to spawn/connect.
-- MCPO setup and usage examples: [docs/mcpo-setup.md](docs/mcpo-setup.md:1).
+- MCPO setup and usage examples: [docs/mcpo-setup.md](docs/mcpo-setup.md).
 
 ## Container (Docker/Podman)
 
@@ -250,10 +250,10 @@ Common make targets (see [Makefile](Makefile)):
 - Unit tests live under `tests/` (currently focused on filters, the HTTP client and the service layer).
 - Install test/dev dependencies with either `make dev` or `pip install -e ".[dev]"`. This pulls in `pytest`, `pytest-asyncio` and the other tools used by the test suite and CI.
 - Run `pytest` locally (or `make test`) to execute the test suite.
-- The CI workflow at [`.github/workflows/ci.yml`](.github/workflows/ci.yml:1) runs on every push and pull request to `main` and executes:
+- The CI workflow at [`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs on every push and pull request to `main` and executes:
   - editable install with dev dependencies (`pip install -e ".[dev]"`)
   - linting via `ruff` and formatting check via `black`
-  - type checking via `mypy` on [`src/`](src:1)
+  - type checking via `mypy` on [`src/`](src/)
   - the same pytest suite you can run locally
 
 Keeping local `make ci` green should match what GitHub Actions enforces.
@@ -268,8 +268,8 @@ This is experimental software and not supported by Icinga as a product. Issues a
 
 ## Links
 
-- REST details and endpoint behavior: [docs/icinga-web-api.md](docs/icinga-web-api.md:1)
-- MCPO setup and tool usage: [docs/mcpo-setup.md](docs/mcpo-setup.md:1)
-- Example requests: [examples/http-examples.http](examples/http-examples.http:1)
-- REST app: [src/icinga_mcp/rest_app.py](src/icinga_mcp/rest_app.py:1)
-- Service layer: [src/icinga_mcp/services.py](src/icinga_mcp/services.py:1)
+- REST details and endpoint behavior: [docs/icinga-web-api.md](docs/icinga-web-api.md)
+- MCPO setup and tool usage: [docs/mcpo-setup.md](docs/mcpo-setup.md)
+- Example requests: [examples/http-examples.http](examples/http-examples.http)
+- REST app: [src/icinga_mcp/rest_app.py](src/icinga_mcp/rest_app.py)
+- Service layer: [src/icinga_mcp/services.py](src/icinga_mcp/services.py)
