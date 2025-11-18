@@ -7,18 +7,18 @@ Important: This repository is not an officially supported Icinga product. It is 
 
 ## Table of contents
 
-- Features
-- How it works
-- Prerequisites
-- Quickstart
-- Configuration
-- REST API
-- MCP tools (MCPO)
-- Container (Docker/Podman)
-- Development
-- License
-- Feedback and support
-- Links
+- [Features](#features)
+- [How it works](#how-it-works)
+- [Prerequisites](#prerequisites)
+- [Quickstart](#quickstart)
+- [Configuration](#configuration)
+- [REST API](#rest-api)
+- [MCP tools (MCPO)](#mcp-tools-mcpo)
+- [Container (Docker/Podman)](#container-dockerpodman)
+- [Development](#development)
+- [License](#license)
+- [Feedback and support](#feedback-and-support)
+- [Links](#links)
 
 ## Features
 
@@ -47,14 +47,16 @@ References: [src/icinga_mcp/rest_app.py](src/icinga_mcp/rest_app.py:1), [src/ici
 
 ## Quickstart
 
-1) Create venv and install dev deps
+The steps below describe a typical local setup using a Python virtual environment. For a container-based workflow, see [Container (Docker/Podman)](#container-dockerpodman).
+
+1) Create and activate a virtualenv, then install dependencies
 ```bash
 make venv
 . .venv/bin/activate
-make dev
+make dev  # installs the package in editable mode plus dev/test tooling and pre-commit hooks
 ```
 
-2) Copy and edit environment
+2) Copy and edit environment configuration
 ```bash
 cp .env.example .env
 # Required upstream settings:
@@ -80,18 +82,18 @@ icinga-mcp-rest
 ```
 Swagger UI: http://127.0.0.1:8080/docs
 
-4) Run the MCP server (for MCPO)
+4) Verify the REST API health
+```bash
+icinga-mcp-health
+```
+
+5) (Optional) Run the MCP server for MCPO
 ```bash
 make run-mcp
 # or:
 icinga-mcp-server
 ```
 See [docs/mcpo-setup.md](docs/mcpo-setup.md:1) and helpers in [scripts/](scripts).
-
-5) Health check
-```bash
-icinga-mcp-health
-```
 
 ## Configuration
 
@@ -166,13 +168,13 @@ export ICINGA_WEB_BASE_URL="https://monitoring.example.com/icingaweb2"
 
 ## Container (Docker/Podman)
 
-A ready-to-build container is provided via the root-level Containerfile. It runs the REST server by default, loads your .env, and exposes port 8080.
+A ready-to-build container is provided via the root-level Containerfile. It runs the REST server by default, loads your .env, and exposes port 8080. This section mirrors the local Quickstart, but for Docker/Podman users.
 
-Prerequisites
+### Prerequisites
 - Docker or Podman installed
 - Copy and edit environment: cp .env.example .env
 
-Build the image
+### Build the image
 ```bash
 # Docker
 docker build -t icinga-mcp:local -f Containerfile .
@@ -181,7 +183,7 @@ docker build -t icinga-mcp:local -f Containerfile .
 podman build -t icinga-mcp:local -f Containerfile .
 ```
 
-Run the REST API (port-forward + .env)
+### Run the REST API (port-forward + .env)
 ```bash
 docker run --rm --name icinga-mcp \
   -p 8080:8080 \
@@ -195,7 +197,7 @@ docker run --rm --name icinga-mcp \
   icinga-mcp:local
 ```
 
-Verify the service
+### Verify the service
 ```bash
 # If REST auth is disabled
 curl -fsS http://localhost:8080/health
@@ -205,7 +207,7 @@ curl -fsS -H "Authorization: Bearer $REST_BEARER_TOKEN" http://localhost:8080/he
 ```
 Swagger UI: http://localhost:8080/docs
 
-TLS CA bundle (optional)
+### TLS CA bundle (optional)
 ```bash
 docker run --rm --name icinga-mcp \
   -p 8080:8080 \
@@ -215,7 +217,7 @@ docker run --rm --name icinga-mcp \
   icinga-mcp:local
 ```
 
-Run the MCP stdio server (instead of REST)
+### Run the MCP stdio server (instead of REST)
 ```bash
 docker run --rm --name icinga-mcp-stdio \
   --env-file ./.env \
@@ -223,11 +225,11 @@ docker run --rm --name icinga-mcp-stdio \
   icinga-mcp:local
 ```
 
-Notes
+### Notes
 - In the container, REST_HOST defaults to 0.0.0.0; no change required for port mapping.
 - Container EXPOSEs 8080; publish with -p 8080:8080 (or any host port you prefer).
 - Healthcheck inside the image calls /health and uses REST_BEARER_TOKEN if set.
-- The image runs as a non-root user (UID 10001); ensure mounted files (e.g., .env, CA bundle) are readable by that UID.
+- The image runs as a non-root user (UID 10001); ensure mounted files (e.g., .env, CA bundle) are readable by that UID).
 
 ## Development
 
