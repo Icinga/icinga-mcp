@@ -3,12 +3,15 @@
 Author: Bernd Erk - Icinga GmbH
 License: GPL-2.0-only
 """
+
 from __future__ import annotations
 
 import asyncio
-from .logging import setup_logging
-from .config import load_settings
+
 import uvicorn
+
+from .config import load_settings
+from .logging import setup_logging
 
 
 def run_rest() -> None:
@@ -19,6 +22,7 @@ def run_rest() -> None:
     """
     setup_logging()
     from .rest_app import app
+
     s = load_settings()
     uvicorn.run(app, host=s.rest_host, port=s.rest_port, log_level="info")
 
@@ -31,6 +35,7 @@ def run_mcp() -> None:
     setup_logging()
     # Runs stdio MCP server; MCPO will spawn this command.
     from .mcp_server import run_stdio
+
     asyncio.run(run_stdio())
 
 
