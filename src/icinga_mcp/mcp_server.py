@@ -152,7 +152,9 @@ async def run_stdio() -> None:
     client = IcingaWebClient(settings)
     service = IcingaDBService(client, settings)
 
-    server = Server("icinga-mcp")
+    # The mcp.server.Server type stub does not currently expose the .tool decorator,
+    # but it exists at runtime. Annotate as Any to keep mypy happy around @server.tool usage.
+    server: Any = Server("icinga-mcp")
 
     async def _json(result: Any) -> list[TextContent]:
         return [TextContent(type="text", text=json.dumps(result))]
@@ -462,4 +464,5 @@ async def run_stdio() -> None:
         return await _json(res.model_dump())
 
     async with stdio_server() as (read_stream, write_stream):
-        await server.run(read_stream, write_stream)
+        # initialization_options is required by the type stub but is optional in practice.
+        await server.run(read_stream, write_stream, initialization_options=None)

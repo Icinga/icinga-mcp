@@ -715,12 +715,12 @@ async def search(
     # Hostgroups (overview list; keep only important columns)
     hostgroups_raw = await svc().list_hostgroups(page=None, limit=None, extra=extra_filter)
     hostgroups: list[dict[str, Any]] = []
-    for g in hostgroups_raw:
-        if not isinstance(g, dict):
+    for hg in hostgroups_raw:
+        if not isinstance(hg, dict):
             continue
         hostgroups.append(
             {
-                "name": g.get("name"),
+                "name": hg.get("name"),
                 "type": "hostgroup",
             }
         )
@@ -728,12 +728,12 @@ async def search(
     # Servicegroups (overview list; keep only important columns)
     servicegroups_raw = await svc().list_servicegroups(page=None, limit=None, extra=extra_filter)
     servicegroups: list[dict[str, Any]] = []
-    for g in servicegroups_raw:
-        if not isinstance(g, dict):
+    for sg in servicegroups_raw:
+        if not isinstance(sg, dict):
             continue
         servicegroups.append(
             {
-                "name": g.get("name"),
+                "name": sg.get("name"),
                 "type": "servicegroup",
             }
         )
@@ -975,14 +975,17 @@ async def get_notifications(
 async def post_remove_downtime(
     body: DowntimeRemoveByName = Body(
         ...,
-        examples={
-            "by_name": {
-                "summary": "By 'name' from downtimes list",
-                "description": "Send the exact 'name' value from GET /downtimes",
-                "value": {"name": "sardine.vm.icinga.com!f09a0d5a-52f3-4361-a550-2aeecb1d0a3d"},
-            }
-        },
-    )
+        examples=cast(
+            Any,
+            {
+                "by_name": {
+                    "summary": "By 'name' from downtimes list",
+                    "description": "Send the exact 'name' value from GET /downtimes",
+                    "value": {"name": "sardine.vm.icinga.com!f09a0d5a-52f3-4361-a550-2aeecb1d0a3d"},
+                }
+            },
+        ),
+    ),
 ):
     payload = body.model_dump(exclude_none=True)
     return await svc().remove_downtime(payload)
@@ -1016,16 +1019,19 @@ async def post_downtime_host(
     host: str | None = Query(default=None, description="Equals host.name"),
     body: DowntimeHostCreate = Body(
         ...,
-        examples={
-            "hour": {
-                "summary": "1-hour host downtime",
-                "value": {"comment": "nix", "window": "hour"},
+        examples=cast(
+            Any,
+            {
+                "hour": {
+                    "summary": "1-hour host downtime",
+                    "value": {"comment": "nix", "window": "hour"},
+                },
+                "day": {
+                    "summary": "1-day host downtime",
+                    "value": {"comment": "maintenance window", "window": "day"},
+                },
             },
-            "day": {
-                "summary": "1-day host downtime",
-                "value": {"comment": "maintenance window", "window": "day"},
-            },
-        },
+        ),
     ),
 ):
     # Reject any service parameters for host downtime
@@ -1059,16 +1065,19 @@ async def post_downtime_service(
     host: str | None = Query(default=None, description="Equals host.name"),
     body: DowntimeServiceCreate = Body(
         ...,
-        examples={
-            "hour": {
-                "summary": "1-hour service downtime",
-                "value": {"comment": "hurra", "window": "hour"},
+        examples=cast(
+            Any,
+            {
+                "hour": {
+                    "summary": "1-hour service downtime",
+                    "value": {"comment": "hurra", "window": "hour"},
+                },
+                "week": {
+                    "summary": "1-week service downtime",
+                    "value": {"comment": "long maintenance", "window": "week"},
+                },
             },
-            "week": {
-                "summary": "1-week service downtime",
-                "value": {"comment": "long maintenance", "window": "week"},
-            },
-        },
+        ),
     ),
 ):
     # Resolve required upstream-style arguments: name=<service> and host.name=<host>
@@ -1154,14 +1163,17 @@ async def get_comments(
 async def post_remove_comment(
     body: CommentRemoveByName = Body(
         ...,
-        examples={
-            "by_name": {
-                "summary": "By 'name' from comments list",
-                "description": "Send the exact 'name' value from GET /comments",
-                "value": {"name": "answer.vm.icinga.com!f1cd84f1-583e-493f-b42b-86b9e1c6d325"},
-            }
-        },
-    )
+        examples=cast(
+            Any,
+            {
+                "by_name": {
+                    "summary": "By 'name' from comments list",
+                    "description": "Send the exact 'name' value from GET /comments",
+                    "value": {"name": "answer.vm.icinga.com!f1cd84f1-583e-493f-b42b-86b9e1c6d325"},
+                }
+            },
+        ),
+    ),
 ):
     payload = body.model_dump(exclude_none=True)
     return await svc().remove_comment(payload)
@@ -1180,9 +1192,15 @@ async def post_comment_host(
     host: str | None = Query(default=None, description="Equals host.name"),
     body: CommentHostCreate = Body(
         ...,
-        examples={
-            "basic": {"summary": "Create host comment", "value": {"comment": "Planned maintenance"}}
-        },
+        examples=cast(
+            Any,
+            {
+                "basic": {
+                    "summary": "Create host comment",
+                    "value": {"comment": "Planned maintenance"},
+                }
+            },
+        ),
     ),
 ):
     # Reject any service parameters
@@ -1216,12 +1234,15 @@ async def post_comment_service(
     host: str | None = Query(default=None, description="Equals host.name"),
     body: CommentServiceCreate = Body(
         ...,
-        examples={
-            "basic": {
-                "summary": "Create service comment",
-                "value": {"comment": "Noted by on-call"},
-            }
-        },
+        examples=cast(
+            Any,
+            {
+                "basic": {
+                    "summary": "Create service comment",
+                    "value": {"comment": "Noted by on-call"},
+                }
+            },
+        ),
     ),
 ):
     # Resolve required upstream-style arguments: name=<service> and host.name=<host>
@@ -1264,9 +1285,15 @@ async def post_acknowledgement_host(
     host: str | None = Query(default=None, description="Equals host.name"),
     body: AcknowledgementHostCreate = Body(
         ...,
-        examples={
-            "basic": {"summary": "Acknowledge host problem", "value": {"comment": "ich bin dran"}}
-        },
+        examples=cast(
+            Any,
+            {
+                "basic": {
+                    "summary": "Acknowledge host problem",
+                    "value": {"comment": "ich bin dran"},
+                }
+            },
+        ),
     ),
 ):
     # Reject any service parameters
@@ -1301,12 +1328,15 @@ async def post_acknowledgement_service(
     host: str | None = Query(default=None, description="Equals host.name"),
     body: AcknowledgementServiceCreate = Body(
         ...,
-        examples={
-            "basic": {
-                "summary": "Acknowledge service problem",
-                "value": {"comment": "ich bin dran"},
-            }
-        },
+        examples=cast(
+            Any,
+            {
+                "basic": {
+                    "summary": "Acknowledge service problem",
+                    "value": {"comment": "ich bin dran"},
+                }
+            },
+        ),
     ),
 ):
     # Resolve required upstream-style arguments: name=<service> and host.name=<host>

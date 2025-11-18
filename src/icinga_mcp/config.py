@@ -155,4 +155,6 @@ class Settings(BaseSettings):
 
 
 def load_settings() -> Settings:
-    return Settings()
+    # mypy does not understand pydantic BaseSettings' generated __init__ signature.
+    # All fields have defaults and are loaded from the environment at runtime.
+    return Settings()  # type: ignore[call-arg]

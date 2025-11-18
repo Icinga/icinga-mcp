@@ -204,6 +204,10 @@ class IcingaWebClient:
                     )
                 return resp
 
+        # mypy: loop above should always either return or raise, but add an explicit
+        # fallback so the function is total from the type checker's perspective.
+        raise RuntimeError("unreachable: AsyncRetrying loop exhausted without returning")
+
     async def get_json(self, path: str, *, params: dict[str, str] | None = None) -> Any:
         """GET JSON helper with raise_for_status and JSON decoding."""
         # Use endpoint path as provided (no forced trailing slash)

@@ -44,6 +44,7 @@ Requires-Dist: types-setuptools; extra == "dev"
 Dynamic: license-file
 
 # icinga-mcp
+[![CI](https://github.com/icinga/icinga-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/icinga/icinga-mcp/actions/workflows/ci.yml)
 
 MCP/MCPO and REST bridge for Icinga Web 2 (Icinga DB Web module).
 
