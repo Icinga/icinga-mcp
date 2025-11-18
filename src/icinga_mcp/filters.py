@@ -1,7 +1,7 @@
 from __future__ import annotations
 from typing import Dict, Any
 
-ALLOWED_QUERY_KEYS = {"page", "limit", "name", "filter"}
+ALLOWED_QUERY_KEYS = {"page", "limit", "name", "name~", "name_ci~", "filter"}
 
 def sanitize_query(params: Dict[str, Any]) -> Dict[str, str]:
     """Normalize query for Icinga DB Web:

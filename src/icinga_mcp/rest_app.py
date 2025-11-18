@@ -504,6 +504,7 @@ tags_metadata = [
     {"name": "Downtimes", "description": "List and manage downtimes"},
     {"name": "Notifications", "description": "List notifications"},
     {"name": "History", "description": "Event histories for hosts and services"},
+    {"name": "Search", "description": "Cross-object search for hosts, services, and groups"},
 ]
 
 app = FastAPI(
@@ -615,6 +616,72 @@ def qparams_basic(
 ):
     # Basic pagination only (no convenience host/service)
     return {"page": page, "limit": limit}
+
+
+@app.get(
+    "/search",
+    tags=["Search"],
+    summary="Search hosts, services, and groups by name (case-insensitive)",
+    description=(
+        "Search hosts, services, hostgroups and servicegroups by name (case-insensitive). "
+        "The provided name fragment is wrapped in '*' and sent to Icinga DB Web "
+        "using the 'name_ci~' case-insensitive wildcard filter on each upstream endpoint."
+    ),
+)
+async def search(
+    name: str = Query(
+        ...,
+        min_length=1,
+        description="Name fragment to search for; the server wraps this as *<name>* for upstream case-insensitive wildcard match via name_ci~",
+    ),
+):
+    pattern = f"*{name}*"
+    extra_filter: Dict[str, Any] = {"name_ci~": pattern}
+
+    # Hosts (summary projection, same fields as /hosts)
+    hosts_raw = await svc().list_hosts(page=None, limit=None, extra=extra_filter)
+    host_fields = cfg().get_host_summary_fields()
+    hosts_norm = [_normalize_summary_item(h, scope="host") for h in hosts_raw]
+    hosts = _project_list(hosts_norm, host_fields)
+    for item in hosts:
+        item["type"] = "host"
+
+    # Services (summary projection, same fields as /services)
+    services_raw = await svc().list_services(page=None, limit=None, extra=extra_filter)
+    service_fields = cfg().get_service_summary_fields()
+    services_norm = [_normalize_summary_item(s, scope="service") for s in services_raw]
+    services = _project_list(services_norm, service_fields)
+    for item in services:
+        item["type"] = "service"
+
+    # Hostgroups (overview list; keep only important columns)
+    hostgroups_raw = await svc().list_hostgroups(page=None, limit=None, extra=extra_filter)
+    hostgroups: list[Dict[str, Any]] = []
+    for g in hostgroups_raw:
+        if not isinstance(g, dict):
+            continue
+        hostgroups.append(
+            {
+                "name": g.get("name"),
+                "type": "hostgroup",
+            }
+        )
+
+    # Servicegroups (overview list; keep only important columns)
+    servicegroups_raw = await svc().list_servicegroups(page=None, limit=None, extra=extra_filter)
+    servicegroups: list[Dict[str, Any]] = []
+    for g in servicegroups_raw:
+        if not isinstance(g, dict):
+            continue
+        servicegroups.append(
+            {
+                "name": g.get("name"),
+                "type": "servicegroup",
+            }
+        )
+
+    # Combined result; client distinguishes object kind via 'type'
+    return hosts + services + hostgroups + servicegroups
 
 
 @app.get(

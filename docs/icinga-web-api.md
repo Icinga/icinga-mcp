@@ -87,9 +87,29 @@ Please verify against your Icinga DB Web /docs. If your upstream path differs, a
 - Set summary=false to receive full upstream records without projection.
 - Endpoints supporting summary/fields: GET /hosts, /services, /problems/hosts, /problems/services, /comments (summary shows safe compact shape), /downtimes, /notifications, group member listings when name is provided (GET /hostgroups?name=..., GET /servicegroups?name=...), and history endpoints (/history/host, /history/service) where summary provides flattened event data.
 
+## Search
+- Cross-object search endpoint to look up hosts, services, and groups by name (case-insensitive).
+- REST route: GET /search
+  - Required query parameter:
+    - name: name fragment to search for.
+- Behavior:
+  - The REST server wraps the provided name in wildcards (*<name>*) and forwards it as the `name_ci~` case-insensitive wildcard filter to each upstream endpoint:
+    - /icingadb/hosts?name_ci~*<name>*
+    - /icingadb/services?name_ci~*<name>*
+    - /icingadb/hostgroups?name_ci~*<name>*
+    - /icingadb/servicegroups?name_ci~*<name>*
+  - Hosts and services:
+    - Use the same summary normalization as GET /hosts and GET /services (including default summary field sets).
+    - The result is filtered to the configured summary fields for hosts and services.
+  - Hostgroups and servicegroups:
+    - Use the upstream overview endpoints and are reduced to important columns (currently the group name).
+- All returned records include a type field so clients can distinguish object kinds:
+  - host, service, hostgroup, servicegroup.
+
 References:
-- Routes and schemas: [src/icinga_mcp/rest_app.py](src/icinga_mcp/rest_app.py:1)
-- Service calls and upstream mapping: [src/icinga_mcp/services.py](src/icinga_mcp/services.py:1)
+- Routes and schemas (search handler and helpers): [src/icinga_mcp/rest_app.py](src/icinga_mcp/rest_app.py:620)
+- Service calls and upstream mapping: [src/icinga_mcp/services.py](src/icinga_mcp/services.py:27)
+- Query sanitization (operator filter support, e.g. `name_ci~`): [src/icinga_mcp/filters.py](src/icinga_mcp/filters.py:1)
 - Example requests: [examples/http-examples.http](examples/http-examples.http:1)
 
 ## Downtimes

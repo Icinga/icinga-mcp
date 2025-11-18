@@ -29,6 +29,12 @@ GET {{host}}/hosts?filter=host.name%20%3D%20%22test.example.com%22&page=1&limit=
 GET {{host}}/services?filter=service.name%20%3D%20%22Ping%22&page=1&limit=50
 
 ###
+# Search
+# Cross-object search for hosts, services, hostgroups and servicegroups by name (case-insensitive).
+# The server wraps the provided name in '*' and forwards it as name_ci~ to each upstream endpoint.
+GET {{host}}/search?name=vm
+
+###
 # Hostgroups
 GET {{host}}/hostgroups
 

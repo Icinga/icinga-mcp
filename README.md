@@ -27,7 +27,7 @@ icinga-mcp exposes two surfaces:
 
 Capabilities:
 - Talks to Icinga Web 2: Icinga DB Web module (not the Icinga 2 core API).
-- Read/write operations: list hosts/services/problems, groups, history; comments; acknowledgements; downtimes; notifications; rescheduling; processing results.
+- Read/write operations: list hosts/services/problems, groups, history; comments; acknowledgements; downtimes; notifications; on-demand checks.
 - Optional normalization/summary projections for UI/LLM consumption.
 
 References: [src/icinga_mcp/rest_app.py](src/icinga_mcp/rest_app.py:1), [src/icinga_mcp/services.py](src/icinga_mcp/services.py:1), [docs/icinga-web-api.md](docs/icinga-web-api.md:1).
@@ -114,6 +114,7 @@ Secrets are never logged; TLS verification is on by default. Use a least-privile
   - Comments: list, add host/service, remove by composite name
   - Acknowledgements: add/remove for host/service
   - Notifications: enable/disable host/service; list notifications
+  - Search: cross-object name lookup across hosts, services, hostgroups and servicegroups
   - Checks: reschedule host/service, process check results
 - Filtering and pagination:
   - Use dotted filters like host.name or service.name; convenience params host and service are mapped for you
@@ -138,6 +139,10 @@ curl -X POST -H "Content-Type: application/json" \
   -H "Authorization: Bearer $REST_BEARER_TOKEN" \
   'http://127.0.0.1:8080/comment/service?service=HTTP&host=web01' \
   -d '{"comment":"Investigating"}'
+
+# Search across hosts, services and groups by name
+curl -H "Authorization: Bearer $REST_BEARER_TOKEN" \
+  'http://127.0.0.1:8080/search?name=vm'
 ```
 
 Notifications (example)
@@ -154,7 +159,7 @@ export ICINGA_WEB_BASE_URL="https://monitoring.example.com/icingaweb2"
 
 ## MCP tools (MCPO)
 
-- Exposes tools analogous to REST operations for MCPO orchestration (list_hosts, list_services, list_problems, schedule_downtime, acknowledge, comments, notifications, reschedule, process_result, etc.).
+- Exposes tools analogous to core REST operations for MCPO orchestration (list_hosts, list_services, list_host_problems, list_service_problems, history, comments, downtimes, groups, etc.).
 - Start the server with make run-mcp or the icinga-mcp-server console script, then configure MCPO to spawn/connect.
 - MCPO setup and usage examples: [docs/mcpo-setup.md](docs/mcpo-setup.md:1).
 

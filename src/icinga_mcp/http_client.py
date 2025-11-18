@@ -96,9 +96,23 @@ class IcingaWebClient:
         # Example desired: thermos.vm.icinga.com!Load!2caf6a2b-cf98-4b86-8736-cb0a77846746
         qp: str | None = None
         if params:
-            # urlencode with quote_via=quote ensures spaces are encoded as %20
-            # Allow unencoded: ! $ ' ( ) * , - . _ ~
-            qp = urlencode(params, doseq=True, quote_via=quote, safe="!$'()*,-._~")
+            # Custom encoding:
+            # - Spaces encoded as %20 (via urllib.parse.quote).
+            # - Safe characters (left unescaped): ! $ ' ( ) * , - . _ ~
+            # - Special handling for operator-style keys like "name_ci~" (and similar "*~"):
+            #   they are encoded as "name_ci~*value*" (no '=') to match Icinga Web filter syntax.
+            encoded_pairs: list[str] = []
+            for k, v in params.items():
+                if v is None:
+                    continue
+                k_enc = quote(str(k), safe="!$'()*,-._~")
+                v_enc = quote(str(v), safe="!$'()*,-._~")
+                if k.endswith("~"):
+                    # Operator filters such as name_ci~*foo*: no '=' between key and value
+                    encoded_pairs.append(f"{k_enc}{v_enc}")
+                else:
+                    encoded_pairs.append(f"{k_enc}={v_enc}")
+            qp = "&".join(encoded_pairs) if encoded_pairs else None
 
         async for attempt in AsyncRetrying(
             stop=stop_after_attempt(self.s.max_retries),
