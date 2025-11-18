@@ -7,15 +7,22 @@ This module provides an async HTTP client wrapper around httpx with retry,
 URL-safe query encoding and structured logging for interacting with the
 Icinga Web 2 Icinga DB Web JSON endpoints.
 """
+
 from __future__ import annotations
 
-import json
-from typing import Any, Dict, Optional
+from typing import Any
+from urllib.parse import quote
+
 import httpx
-from tenacity import AsyncRetrying, stop_after_attempt, wait_exponential_jitter, retry_if_exception_type
-from .config import Settings
 import structlog
-from urllib.parse import urlencode, quote
+from tenacity import (
+    AsyncRetrying,
+    retry_if_exception_type,
+    stop_after_attempt,
+    wait_exponential_jitter,
+)
+
+from .config import Settings
 
 log = structlog.get_logger(__name__)
 
@@ -26,9 +33,10 @@ class IcingaWebClient:
     Attributes:
         s: Settings used to configure timeouts, TLS, retries, and base_url.
     """
+
     def __init__(self, settings: Settings):
         self.s = settings
-        self._client: Optional[httpx.AsyncClient] = None
+        self._client: httpx.AsyncClient | None = None
 
     async def _ensure_client(self) -> httpx.AsyncClient:
         """Ensure a singleton httpx.AsyncClient configured with auth, TLS, timeouts, and headers.
@@ -67,9 +75,9 @@ class IcingaWebClient:
         method: str,
         path: str,
         *,
-        params: Dict[str, str] | None = None,
+        params: dict[str, str] | None = None,
         json_body: Any | None = None,
-        form_fields: Dict[str, str] | None = None,
+        form_fields: dict[str, str] | None = None,
     ) -> httpx.Response:
         """Perform an HTTP request against the configured Icinga Web base URL.
 
@@ -130,13 +138,18 @@ class IcingaWebClient:
                     url_obj = httpx.URL(url).copy_with(query=qp.encode("ascii"))
                 prepared_url_str = str(url_obj)
                 prepared_raw_path = url_obj.raw_path.decode("ascii")
-                log.debug("upstream.request.prepared", method=method, request_url=prepared_url_str, raw_path=prepared_raw_path)
+                log.debug(
+                    "upstream.request.prepared",
+                    method=method,
+                    request_url=prepared_url_str,
+                    raw_path=prepared_raw_path,
+                )
 
                 # Ensure only one body type is provided
                 if json_body is not None and form_fields is not None:
                     raise ValueError("Provide either json_body or form_fields, not both")
 
-                req_kwargs: Dict[str, Any] = {}
+                req_kwargs: dict[str, Any] = {}
                 if json_body is not None:
                     req_kwargs["json"] = json_body
                 elif form_fields is not None:
@@ -144,7 +157,12 @@ class IcingaWebClient:
                     req_kwargs["data"] = form_fields
 
                 req = client.build_request(method, url_obj, **req_kwargs)
-                log.debug("upstream.request", method=method, url=str(req.url), raw_path=req.url.raw_path.decode("ascii"))
+                log.debug(
+                    "upstream.request",
+                    method=method,
+                    url=str(req.url),
+                    raw_path=req.url.raw_path.decode("ascii"),
+                )
                 resp = await client.send(req)
 
                 # Log response meta for visibility
@@ -186,7 +204,7 @@ class IcingaWebClient:
                     )
                 return resp
 
-    async def get_json(self, path: str, *, params: Dict[str, str] | None = None) -> Any:
+    async def get_json(self, path: str, *, params: dict[str, str] | None = None) -> Any:
         """GET JSON helper with raise_for_status and JSON decoding."""
         # Use endpoint path as provided (no forced trailing slash)
         resp = await self.request("GET", path, params=params)
@@ -199,8 +217,9 @@ class IcingaWebClient:
         resp.raise_for_status()
         return resp.json() if resp.content else {}
 
-    async def delete(self, path: str, *, params: Dict[str, str] | None = None) -> int:
+    async def delete(self, path: str, *, params: dict[str, str] | None = None) -> int:
         """DELETE helper returning the HTTP status code."""
         resp = await self.request("DELETE", path, params=params)
         resp.raise_for_status()
-        return resp.status_code
+        # Cast to int so static type checkers don't treat status_code as Any.
+        return int(resp.status_code)

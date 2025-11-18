@@ -1,4 +1,5 @@
 # icinga-mcp
+[![CI](https://github.com/icinga/icinga-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/icinga/icinga-mcp/actions/workflows/ci.yml)
 
 MCP/MCPO and REST bridge for Icinga Web 2 (Icinga DB Web module).
 
@@ -241,6 +242,19 @@ Common make targets (see [Makefile](Makefile)):
 - run-rest: launch uvicorn with reload
 - run-mcp: launch the stdio MCP server
 - ci: run the usual local CI chain
+
+### Testing and CI
+
+- Unit tests live under `tests/` (currently focused on filters, the HTTP client and the service layer).
+- Install test/dev dependencies with either `make dev` or `pip install -e ".[dev]"`. This pulls in `pytest`, `pytest-asyncio` and the other tools used by the test suite and CI.
+- Run `pytest` locally (or `make test`) to execute the test suite.
+- The CI workflow at [`.github/workflows/ci.yml`](.github/workflows/ci.yml:1) runs on every push and pull request to `main` and executes:
+  - editable install with dev dependencies (`pip install -e ".[dev]"`)
+  - linting via `ruff` and formatting check via `black`
+  - type checking via `mypy` on [`src/`](src:1)
+  - the same pytest suite you can run locally
+
+Keeping local `make ci` green should match what GitHub Actions enforces.
 
 ## License
 

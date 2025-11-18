@@ -7,26 +7,49 @@ This module exposes REST endpoints that proxy Icinga Web 2 (Icinga DB Web module
 with normalized, summary-friendly responses and consistent error handling.
 See docs/icinga-web-api.md for endpoint mapping and behavior.
 """
+
+# ruff: noqa: B008
 from __future__ import annotations
 
-from fastapi import FastAPI, Depends, Query, HTTPException, Request, Body, Security
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from fastapi.responses import JSONResponse
-from httpx import RequestError, HTTPStatusError
 from contextlib import asynccontextmanager
-from .config import load_settings, Settings
-from .http_client import IcingaWebClient
-from .services import IcingaDBService
-from .logging import setup_logging
-from .models import Host, Service, HostGroup, ServiceGroup, Downtime, Comment, Notification, Event, ActionResult, CommentHostCreate, CommentServiceCreate, CommentRemoveByName, AcknowledgementHostCreate, AcknowledgementServiceCreate, DowntimeHostCreate, DowntimeServiceCreate, DowntimeRemoveByName
-from typing import Any, Dict, Optional, Literal
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
+from typing import Any, Literal, cast
+
 import structlog
+from fastapi import Body, Depends, FastAPI, HTTPException, Query, Request, Security
+from fastapi.responses import JSONResponse
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from httpx import HTTPStatusError, RequestError
+
+from .config import Settings, load_settings
+from .http_client import IcingaWebClient
+from .logging import setup_logging
+from .models import (
+    AcknowledgementHostCreate,
+    AcknowledgementServiceCreate,
+    ActionResult,
+    Comment,
+    CommentHostCreate,
+    CommentRemoveByName,
+    CommentServiceCreate,
+    Downtime,
+    DowntimeHostCreate,
+    DowntimeRemoveByName,
+    DowntimeServiceCreate,
+    Event,
+    Host,
+    HostGroup,
+    Notification,
+    Service,
+    ServiceGroup,
+)
+from .services import IcingaDBService
 
 setup_logging()
 log = structlog.get_logger(__name__)
 # HTTP Bearer security scheme for global auth (visible in OpenAPI/Swagger)
 _security_scheme = HTTPBearer(auto_error=False)
+
 
 # Lightweight projection helpers to reduce payload (env-configurable defaults via Settings)
 def _get_in(d: Any, path: str):
@@ -38,24 +61,29 @@ def _get_in(d: Any, path: str):
             return None
     return cur
 
-def _project_item(item: Any, fields: list[str]) -> Dict[str, Any]:
-    out: Dict[str, Any] = {}
+
+def _project_item(item: Any, fields: list[str]) -> dict[str, Any]:
+    out: dict[str, Any] = {}
     for f in fields:
         val = _get_in(item, f)
         if val is not None:
             out[f] = val
     return out
 
-def _parse_fields(fields: Optional[str], default: list[str]) -> list[str]:
+
+def _parse_fields(fields: str | None, default: list[str]) -> list[str]:
     if fields:
         return [f.strip() for f in fields.split(",") if f.strip()]
     return list(default)
 
-def _project_list(items: list[Any], fields: list[str]) -> list[Dict[str, Any]]:
+
+def _project_list(items: list[Any], fields: list[str]) -> list[dict[str, Any]]:
     return [_project_item(i, fields) for i in items]
+
 
 # Timerange helpers for history endpoints
 Timerange = Literal["hour", "day", "week", "month", "quarter", "year", "all"]
+
 
 def _parse_event_time(value: Any) -> datetime | None:
     """
@@ -71,12 +99,12 @@ def _parse_event_time(value: Any) -> datetime | None:
 
     # Numeric epochs
     try:
-        if isinstance(value, (int, float)):
+        if isinstance(value, int | float):
             ts = float(value)
             # Heuristic: values larger than ~10^11 are likely ms since epoch
             if ts > 1e11:
                 ts = ts / 1000.0
-            return datetime.fromtimestamp(ts, tz=timezone.utc)
+            return datetime.fromtimestamp(ts, tz=UTC)
     except Exception:
         pass
 
@@ -89,7 +117,7 @@ def _parse_event_time(value: Any) -> datetime | None:
             num = float(s)
             if num > 1e11:
                 num = num / 1000.0
-            return datetime.fromtimestamp(num, tz=timezone.utc)
+            return datetime.fromtimestamp(num, tz=UTC)
         except Exception:
             pass
 
@@ -99,12 +127,13 @@ def _parse_event_time(value: Any) -> datetime | None:
                 s = s[:-1] + "+00:00"
             dt = datetime.fromisoformat(s)
             if dt.tzinfo is None:
-                dt = dt.replace(tzinfo=timezone.utc)
-            return dt.astimezone(timezone.utc)
+                dt = dt.replace(tzinfo=UTC)
+            return dt.astimezone(UTC)
         except Exception:
             return None
 
     return None
+
 
 def _timerange_since(tr: Timerange | None) -> datetime | None:
     """
@@ -117,7 +146,7 @@ def _timerange_since(tr: Timerange | None) -> datetime | None:
     """
     if not tr or tr == "all":
         return None
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     if tr == "hour":
         delta = timedelta(hours=1)
     elif tr == "day":
@@ -133,6 +162,7 @@ def _timerange_since(tr: Timerange | None) -> datetime | None:
     else:
         return None
     return now - delta
+
 
 def _filter_events_by_time(items: list[Any], since: datetime | None) -> list[Any]:
     """Filter entries by event_time or common notification timestamps (send_time, history.event_time, etc)."""
@@ -155,6 +185,7 @@ def _filter_events_by_time(items: list[Any], since: datetime | None) -> list[Any
         if t is not None and t >= since:
             out.append(it)
     return out
+
 
 # Extract members from group detail payload
 def _extract_group_members(payload: Any, member_keys: list[str]) -> list[Any]:
@@ -182,12 +213,16 @@ def _extract_group_members(payload: Any, member_keys: list[str]) -> list[Any]:
             if isinstance(v, list):
                 return v
     return []
+
+
 # Event normalization helpers for compact summaries
 HOST_STATE_NAMES = {0: "UP", 1: "DOWN", 2: "UNREACHABLE"}
 SERVICE_STATE_NAMES = {0: "OK", 1: "WARNING", 2: "CRITICAL", 3: "UNKNOWN"}
 
 
-def _select_state_codes(item: Any, st: Any, *, use_event_type: bool = True) -> tuple[int | None, int | None]:
+def _select_state_codes(
+    item: Any, st: Any, *, use_event_type: bool = True
+) -> tuple[int | None, int | None]:
     """Return (current_code, previous_code) using event_type when available; fallback to state_type.
     use_event_type controls whether to consult the top-level event_type for hard/soft."""
     if not isinstance(st, dict):
@@ -228,6 +263,7 @@ def _name_for_state(code: int | None, *, scope: str) -> str | None:
 
 def _derive_event_kind(item: Any) -> str:
     """Map implicit subelement presence to a coarse event type."""
+
     def present(*paths: str) -> bool:
         return any(_get_in(item, p) is not None for p in paths)
 
@@ -248,12 +284,12 @@ def _derive_event_kind(item: Any) -> str:
     return str(t) if t else "event"
 
 
-def _normalize_event(item: Any, *, scope: str) -> Dict[str, Any]:
+def _normalize_event(item: Any, *, scope: str) -> dict[str, Any]:
     """
     Produce a flattened summary-friendly dict for an event.
     scope = 'host' | 'service'
     """
-    out: Dict[str, Any] = {}
+    out: dict[str, Any] = {}
     out["time"] = _get_in(item, "event_time")
     out["type"] = _derive_event_kind(item)
     out["host"] = _get_in(item, "host.name")
@@ -276,11 +312,17 @@ def _normalize_event(item: Any, *, scope: str) -> Dict[str, Any]:
         out["previous_state_code"] = sprev
         out["previous_state_name"] = _name_for_state(sprev, scope="service")
         host_state = _get_in(item, "host.state")
-        hcode, _ = _select_state_codes(None, host_state if isinstance(host_state, dict) else {}, use_event_type=False)
+        hcode, _ = _select_state_codes(
+            None, host_state if isinstance(host_state, dict) else {}, use_event_type=False
+        )
         out["host_state_code"] = hcode
         out["host_state_name"] = _name_for_state(hcode, scope="host")
 
-    out["output"] = _get_in(item, "state.output") or _get_in(item, "service.state.output") or _get_in(item, "host.state.output")
+    out["output"] = (
+        _get_in(item, "state.output")
+        or _get_in(item, "service.state.output")
+        or _get_in(item, "host.state.output")
+    )
 
     kind = out["type"]
     if kind == "comment":
@@ -312,7 +354,7 @@ def _derive_current_code(st: Any) -> int | None:
     return st.get("hard_state") if st.get("hard_state") is not None else st.get("soft_state")
 
 
-def _normalize_summary_item(item: Any, *, scope: str) -> Dict[str, Any]:
+def _normalize_summary_item(item: Any, *, scope: str) -> dict[str, Any]:
     """
     Create a shallowly normalized object for list summaries:
     - state.code and state.name derived from hard/soft + state_type
@@ -320,10 +362,10 @@ def _normalize_summary_item(item: Any, *, scope: str) -> Dict[str, Any]:
     scope: 'host' | 'service'
     """
     if not isinstance(item, dict):
-        return item
-    out: Dict[str, Any] = dict(item)
+        return {}
+    out: dict[str, Any] = dict(item)
     st_src = item.get("state")
-    st: Dict[str, Any] = dict(st_src) if isinstance(st_src, dict) else {}
+    st: dict[str, Any] = dict(st_src) if isinstance(st_src, dict) else {}
 
     code = _derive_current_code(st)
     st["code"] = code
@@ -339,14 +381,14 @@ def _normalize_summary_item(item: Any, *, scope: str) -> Dict[str, Any]:
     return out
 
 
-def _normalize_comment(item: Any) -> Dict[str, Any]:
+def _normalize_comment(item: Any) -> dict[str, Any]:
     """
     Produce a compact summary for a comment ensuring we expose 'name' (composite)
     and never the internal 'id'.
     """
     if not isinstance(item, dict):
-        return item
-    out: Dict[str, Any] = {}
+        return {}
+    out: dict[str, Any] = {}
     # Time
     out["time"] = _get_in(item, "entry_time") or _get_in(item, "time")
     # Object context
@@ -365,14 +407,14 @@ def _normalize_comment(item: Any) -> Dict[str, Any]:
     return out
 
 
-def _normalize_downtime(item: Any) -> Dict[str, Any]:
+def _normalize_downtime(item: Any) -> dict[str, Any]:
     """
     Produce a compact summary for a downtime ensuring we expose 'name' (composite)
     suitable for deletion via /icingadb/downtimes/delete?downtime.name=...
     """
     if not isinstance(item, dict):
-        return item
-    out: Dict[str, Any] = {}
+        return {}
+    out: dict[str, Any] = {}
     # Prefer entry/start time for ordering
     out["time"] = (
         _get_in(item, "entry_time")
@@ -388,8 +430,12 @@ def _normalize_downtime(item: Any) -> Dict[str, Any]:
     # Composite name for deletion
     out["name"] = _get_in(item, "name")
     # Content
-    out["author"] = _get_in(item, "author") or _get_in(item, "scheduled_by") or _get_in(item, "downtime.author")
-    out["text"] = _get_in(item, "comment") or _get_in(item, "text") or _get_in(item, "downtime.comment")
+    out["author"] = (
+        _get_in(item, "author") or _get_in(item, "scheduled_by") or _get_in(item, "downtime.author")
+    )
+    out["text"] = (
+        _get_in(item, "comment") or _get_in(item, "text") or _get_in(item, "downtime.comment")
+    )
     # Window and flags
     out["start_time"] = _get_in(item, "start_time") or _get_in(item, "start")
     out["end_time"] = _get_in(item, "end_time") or _get_in(item, "end")
@@ -398,15 +444,15 @@ def _normalize_downtime(item: Any) -> Dict[str, Any]:
     return out
 
 
-def _normalize_notification(item: Any) -> Dict[str, Any]:
+def _normalize_notification(item: Any) -> dict[str, Any]:
     """
     Produce a compact summary for a notification suitable for LLM/UI consumption.
     Unlike comments/downtimes, notifications typically don't have a composite 'name';
     we expose the essential context and message.
     """
     if not isinstance(item, dict):
-        return item
-    out: Dict[str, Any] = {}
+        return {}
+    out: dict[str, Any] = {}
     # Time (prefer explicit send_time; also accept history.event_time and other common fields)
     out["time"] = (
         _get_in(item, "send_time")
@@ -423,8 +469,12 @@ def _normalize_notification(item: Any) -> Dict[str, Any]:
     # Additional attributes for summary view
     out["type"] = _get_in(item, "type") or _get_in(item, "notification.type")
     out["state"] = _get_in(item, "state") or _get_in(item, "notification.state")
-    out["previous_hard_state"] = _get_in(item, "previous_hard_state") or _get_in(item, "notification.previous_hard_state")
-    out["users_notified"] = _get_in(item, "users_notified") or _get_in(item, "notification.users_notified")
+    out["previous_hard_state"] = _get_in(item, "previous_hard_state") or _get_in(
+        item, "notification.previous_hard_state"
+    )
+    out["users_notified"] = _get_in(item, "users_notified") or _get_in(
+        item, "notification.users_notified"
+    )
     # Content
     out["author"] = _get_in(item, "author") or _get_in(item, "notification.author")
     out["text"] = _get_in(item, "text") or _get_in(item, "notification.text")
@@ -434,8 +484,9 @@ def _normalize_notification(item: Any) -> Dict[str, Any]:
 def cfg(application: FastAPI | None = None) -> Settings:
     # Avoid referencing 'app' before it's defined by resolving at call time if needed
     if application is None:
-        return globals()["app"].state.settings
-    return application.state.settings
+        return cast(Settings, globals()["app"].state.settings)
+    return cast(Settings, application.state.settings)
+
 
 # Global auth dependency (Bearer only).
 # Auth is ENABLED if REST_REQUIRE_API_KEY=true OR REST_BEARER_TOKEN is non-empty.
@@ -452,10 +503,11 @@ async def require_auth(
         return
 
     # Load configured bearer token
-    bearer_secret = None
-    if getattr(s, "rest_bearer_token", None) is not None:
+    bearer_secret: str | None = None
+    token = getattr(s, "rest_bearer_token", None)
+    if token is not None:
         try:
-            bearer_secret = s.rest_bearer_token.get_secret_value().strip()
+            bearer_secret = token.get_secret_value().strip()
         except Exception:
             bearer_secret = None
 
@@ -465,7 +517,9 @@ async def require_auth(
 
     if not bearer_secret:
         # Misconfiguration: auth required but no token provided
-        raise HTTPException(status_code=500, detail="REST auth is required but no bearer token is configured")
+        raise HTTPException(
+            status_code=500, detail="REST auth is required but no bearer token is configured"
+        )
 
     # Validate Authorization: Bearer <token>
     if credentials and isinstance(credentials, HTTPAuthorizationCredentials):
@@ -516,6 +570,7 @@ app = FastAPI(
     dependencies=[Depends(require_auth)],
 )
 
+
 # Exception handlers mapping upstream httpx errors to REST semantics
 @app.exception_handler(HTTPStatusError)
 async def _handle_status_error(request, exc: HTTPStatusError):
@@ -544,6 +599,7 @@ async def _handle_status_error(request, exc: HTTPStatusError):
         },
     )
 
+
 @app.exception_handler(RequestError)
 async def _handle_request_error(request, exc: RequestError):
     return JSONResponse(
@@ -554,6 +610,7 @@ async def _handle_request_error(request, exc: RequestError):
             "error_type": exc.__class__.__name__,
         },
     )
+
 
 # Catch-all to surface internal errors (helps diagnose 500s such as pagination issues)
 @app.exception_handler(Exception)
@@ -579,14 +636,14 @@ async def _handle_unexpected_error(request, exc: Exception):
 
 
 def svc(app: FastAPI = app) -> IcingaDBService:
-    return app.state.service
+    return cast(IcingaDBService, app.state.service)
 
 
 def qparams(
-    page: Optional[int] = Query(default=None, ge=1),
-    limit: Optional[int] = Query(default=None, ge=1, le=500),
-    host: Optional[str] = Query(default=None, description="Equals host.name"),
-    service: Optional[str] = Query(default=None, description="Equals service.name"),
+    page: int | None = Query(default=None, ge=1),
+    limit: int | None = Query(default=None, ge=1, le=500),
+    host: str | None = Query(default=None, description="Equals host.name"),
+    service: str | None = Query(default=None, description="Equals service.name"),
 ):
     # Only validate pagination and expose convenience host/service.
     # Actual filtering is done via dotted params (e.g., host.name, service.name) passed through.
@@ -594,25 +651,26 @@ def qparams(
 
 
 def qparams_hosts(
-    page: Optional[int] = Query(default=None, ge=1),
-    limit: Optional[int] = Query(default=None, ge=1, le=500),
-    host: Optional[str] = Query(default=None, description="Equals host.name"),
+    page: int | None = Query(default=None, ge=1),
+    limit: int | None = Query(default=None, ge=1, le=500),
+    host: str | None = Query(default=None, description="Equals host.name"),
 ):
     # Hosts endpoint should not expose service convenience parameter in OpenAPI
     return {"page": page, "limit": limit, "host": host}
 
 
 def qparams_groups(
-    page: Optional[int] = Query(default=None, ge=1),
-    limit: Optional[int] = Query(default=None, ge=1, le=500),
-    name: Optional[str] = Query(default=None, description="Equals group name"),
+    page: int | None = Query(default=None, ge=1),
+    limit: int | None = Query(default=None, ge=1, le=500),
+    name: str | None = Query(default=None, description="Equals group name"),
 ):
     # Groups endpoints expose only 'name' alongside pagination
     return {"page": page, "limit": limit, "name": name}
 
+
 def qparams_basic(
-    page: Optional[int] = Query(default=None, ge=1),
-    limit: Optional[int] = Query(default=None, ge=1, le=500),
+    page: int | None = Query(default=None, ge=1),
+    limit: int | None = Query(default=None, ge=1, le=500),
 ):
     # Basic pagination only (no convenience host/service)
     return {"page": page, "limit": limit}
@@ -636,7 +694,7 @@ async def search(
     ),
 ):
     pattern = f"*{name}*"
-    extra_filter: Dict[str, Any] = {"name_ci~": pattern}
+    extra_filter: dict[str, Any] = {"name_ci~": pattern}
 
     # Hosts (summary projection, same fields as /hosts)
     hosts_raw = await svc().list_hosts(page=None, limit=None, extra=extra_filter)
@@ -656,7 +714,7 @@ async def search(
 
     # Hostgroups (overview list; keep only important columns)
     hostgroups_raw = await svc().list_hostgroups(page=None, limit=None, extra=extra_filter)
-    hostgroups: list[Dict[str, Any]] = []
+    hostgroups: list[dict[str, Any]] = []
     for g in hostgroups_raw:
         if not isinstance(g, dict):
             continue
@@ -669,7 +727,7 @@ async def search(
 
     # Servicegroups (overview list; keep only important columns)
     servicegroups_raw = await svc().list_servicegroups(page=None, limit=None, extra=extra_filter)
-    servicegroups: list[Dict[str, Any]] = []
+    servicegroups: list[dict[str, Any]] = []
     for g in servicegroups_raw:
         if not isinstance(g, dict):
             continue
@@ -693,19 +751,26 @@ async def search(
 )
 async def get_hosts(
     request: Request,
-    params: Dict[str, Any] = Depends(qparams_hosts),
-    fields: Optional[str] = Query(default=None, description="Comma-separated dotted fields to include when summary=true"),
-    summary: Optional[bool] = Query(default=True, description="If true (default), return normalized summary projection; if false, return full upstream records"),
+    params: dict[str, Any] = Depends(qparams_hosts),
+    fields: str | None = Query(
+        default=None, description="Comma-separated dotted fields to include when summary=true"
+    ),
+    summary: bool | None = Query(
+        default=True,
+        description="If true (default), return normalized summary projection; if false, return full upstream records",
+    ),
 ):
     # Pass through host.* dotted filters only; hosts endpoint does not support service.* filters
-    extra: Dict[str, Any] = {k: v for k, v in request.query_params.items() if "." in k and not k.startswith("service.")}
+    extra: dict[str, Any] = {
+        k: v for k, v in request.query_params.items() if "." in k and not k.startswith("service.")
+    }
     if params.get("host"):
         extra["host.name"] = params["host"]
     res = await svc().list_hosts(page=params.get("page"), limit=params.get("limit"), extra=extra)
     if summary is not False:
         f = _parse_fields(fields, cfg().get_host_summary_fields())
         norm = [_normalize_summary_item(r, scope="host") for r in res]
-        res = _project_list(norm, f)
+        return _project_list(norm, f)
     return res
 
 
@@ -718,11 +783,16 @@ async def get_hosts(
 )
 async def get_services(
     request: Request,
-    params: Dict[str, Any] = Depends(qparams),
-    fields: Optional[str] = Query(default=None, description="Comma-separated dotted fields to include when summary=true"),
-    summary: Optional[bool] = Query(default=True, description="If true (default), return normalized summary projection; if false, return full upstream records"),
+    params: dict[str, Any] = Depends(qparams),
+    fields: str | None = Query(
+        default=None, description="Comma-separated dotted fields to include when summary=true"
+    ),
+    summary: bool | None = Query(
+        default=True,
+        description="If true (default), return normalized summary projection; if false, return full upstream records",
+    ),
 ):
-    extra: Dict[str, Any] = {k: v for k, v in request.query_params.items() if "." in k}
+    extra: dict[str, Any] = {k: v for k, v in request.query_params.items() if "." in k}
     if params.get("host"):
         extra["host.name"] = params["host"]
     if params.get("service"):
@@ -731,9 +801,8 @@ async def get_services(
     if summary is not False:
         f = _parse_fields(fields, cfg().get_service_summary_fields())
         norm = [_normalize_summary_item(r, scope="service") for r in res]
-        res = _project_list(norm, f)
+        return _project_list(norm, f)
     return res
-
 
 
 @app.get(
@@ -745,15 +814,20 @@ async def get_services(
 )
 async def get_problem_hosts(
     request: Request,
-    params: Dict[str, Any] = Depends(qparams_hosts),
-    fields: Optional[str] = Query(default=None, description="Comma-separated dotted fields to include when summary=true"),
-    summary: Optional[bool] = Query(default=True, description="If true (default), return normalized summary projection; if false, return full upstream records"),
+    params: dict[str, Any] = Depends(qparams_hosts),
+    fields: str | None = Query(
+        default=None, description="Comma-separated dotted fields to include when summary=true"
+    ),
+    summary: bool | None = Query(
+        default=True,
+        description="If true (default), return normalized summary projection; if false, return full upstream records",
+    ),
 ):
     # Forward host.* dotted filters only and enforce problem-only by default
-    base_dotted: Dict[str, Any] = {
+    base_dotted: dict[str, Any] = {
         k: v for k, v in request.query_params.items() if "." in k and not k.startswith("service.")
     }
-    extra: Dict[str, Any] = dict(base_dotted)
+    extra: dict[str, Any] = dict(base_dotted)
     if params.get("host"):
         extra["host.name"] = params["host"]
     extra.setdefault("host.state.is_problem", "y")
@@ -765,7 +839,7 @@ async def get_problem_hosts(
     if summary is not False:
         f = _parse_fields(fields, cfg().get_host_summary_fields())
         norm = [_normalize_summary_item(r, scope="host") for r in res]
-        res = _project_list(norm, f)
+        return _project_list(norm, f)
     return res
 
 
@@ -778,15 +852,20 @@ async def get_problem_hosts(
 )
 async def get_problem_services(
     request: Request,
-    params: Dict[str, Any] = Depends(qparams),
-    fields: Optional[str] = Query(default=None, description="Comma-separated dotted fields to include when summary=true"),
-    summary: Optional[bool] = Query(default=True, description="If true (default), return normalized summary projection; if false, return full upstream records"),
+    params: dict[str, Any] = Depends(qparams),
+    fields: str | None = Query(
+        default=None, description="Comma-separated dotted fields to include when summary=true"
+    ),
+    summary: bool | None = Query(
+        default=True,
+        description="If true (default), return normalized summary projection; if false, return full upstream records",
+    ),
 ):
     # Forward service.* dotted filters only (plus convenience host/service) and enforce problem-only by default
-    base_dotted: Dict[str, Any] = {
+    base_dotted: dict[str, Any] = {
         k: v for k, v in request.query_params.items() if "." in k and not k.startswith("host.")
     }
-    extra: Dict[str, Any] = dict(base_dotted)
+    extra: dict[str, Any] = dict(base_dotted)
     if params.get("host"):
         extra["host.name"] = params["host"]
     if params.get("service"):
@@ -800,7 +879,7 @@ async def get_problem_services(
     if summary is not False:
         f = _parse_fields(fields, cfg().get_service_summary_fields())
         norm = [_normalize_summary_item(r, scope="service") for r in res]
-        res = _project_list(norm, f)
+        return _project_list(norm, f)
     return res
 
 
@@ -813,24 +892,31 @@ async def get_problem_services(
 )
 async def get_downtimes(
     request: Request,
-    params: Dict[str, Any] = Depends(qparams_basic),
-    host: Optional[str] = Query(default=None, description="Equals host.name"),
-    service: Optional[str] = Query(default=None, description="Equals service.name"),
-    fields: Optional[str] = Query(default=None, description="Comma-separated dotted fields to include when summary=true"),
-    summary: Optional[bool] = Query(default=True, description="If true (default), return normalized summary projection; if false, return full upstream records"),
+    params: dict[str, Any] = Depends(qparams_basic),
+    host: str | None = Query(default=None, description="Equals host.name"),
+    service: str | None = Query(default=None, description="Equals service.name"),
+    fields: str | None = Query(
+        default=None, description="Comma-separated dotted fields to include when summary=true"
+    ),
+    summary: bool | None = Query(
+        default=True,
+        description="If true (default), return normalized summary projection; if false, return full upstream records",
+    ),
 ):
-    extra: Dict[str, Any] = {k: v for k, v in request.query_params.items() if "." in k}
+    extra: dict[str, Any] = {k: v for k, v in request.query_params.items() if "." in k}
     if host:
         extra["host.name"] = host
     if service:
         extra["service.name"] = service
 
-    res = await svc().list_downtimes(page=params.get("page"), limit=params.get("limit"), extra=extra)
+    res = await svc().list_downtimes(
+        page=params.get("page"), limit=params.get("limit"), extra=extra
+    )
 
     if summary is not False:
         f = _parse_fields(fields, cfg().get_downtime_summary_fields())
         norm = [_normalize_downtime(r) for r in res]
-        res = _project_list(norm, f)
+        return _project_list(norm, f)
     return res
 
 
@@ -843,20 +929,30 @@ async def get_downtimes(
 )
 async def get_notifications(
     request: Request,
-    params: Dict[str, Any] = Depends(qparams_basic),
-    host: Optional[str] = Query(default=None, description="Equals host.name"),
-    service: Optional[str] = Query(default=None, description="Equals service.name"),
-    fields: Optional[str] = Query(default=None, description="Comma-separated dotted fields to include when summary=true"),
-    summary: Optional[bool] = Query(default=True, description="If true (default), return normalized summary projection; if false, return full upstream records"),
-    timerange: Timerange = Query(default="all", description="Limit notifications to a time window: hour, day, week, month, quarter, year, or all"),
+    params: dict[str, Any] = Depends(qparams_basic),
+    host: str | None = Query(default=None, description="Equals host.name"),
+    service: str | None = Query(default=None, description="Equals service.name"),
+    fields: str | None = Query(
+        default=None, description="Comma-separated dotted fields to include when summary=true"
+    ),
+    summary: bool | None = Query(
+        default=True,
+        description="If true (default), return normalized summary projection; if false, return full upstream records",
+    ),
+    timerange: Timerange = Query(
+        default="all",
+        description="Limit notifications to a time window: hour, day, week, month, quarter, year, or all",
+    ),
 ):
-    extra: Dict[str, Any] = {k: v for k, v in request.query_params.items() if "." in k}
+    extra: dict[str, Any] = {k: v for k, v in request.query_params.items() if "." in k}
     if host:
         extra["host.name"] = host
     if service:
         extra["service.name"] = service
 
-    res = await svc().list_notifications(page=params.get("page"), limit=params.get("limit"), extra=extra)
+    res = await svc().list_notifications(
+        page=params.get("page"), limit=params.get("limit"), extra=extra
+    )
 
     # Apply local time-window filtering (same semantics as /history/*)
     since = _timerange_since(timerange)
@@ -865,7 +961,7 @@ async def get_notifications(
     if summary is not False:
         f = _parse_fields(fields, cfg().get_notification_summary_fields())
         norm = [_normalize_notification(r) for r in res]
-        res = _project_list(norm, f)
+        return _project_list(norm, f)
     return res
 
 
@@ -889,7 +985,7 @@ async def post_remove_downtime(
     )
 ):
     payload = body.model_dump(exclude_none=True)
-    return await svc().remove_downtime_by_name(payload)
+    return await svc().remove_downtime(payload)
 
 
 # Downtime window helpers (local time, formatted as YYYY-MM-DDTHH:MM:SS)
@@ -916,8 +1012,8 @@ def _start_end_from_window(window: Literal["hour", "day", "week"]) -> tuple[str,
 )
 async def post_downtime_host(
     request: Request,
-    params: Dict[str, Any] = Depends(qparams_basic),
-    host: Optional[str] = Query(default=None, description="Equals host.name"),
+    params: dict[str, Any] = Depends(qparams_basic),
+    host: str | None = Query(default=None, description="Equals host.name"),
     body: DowntimeHostCreate = Body(
         ...,
         examples={
@@ -934,12 +1030,16 @@ async def post_downtime_host(
 ):
     # Reject any service parameters for host downtime
     if "service.name" in request.query_params or "service" in request.query_params:
-        raise HTTPException(status_code=422, detail="Host downtime does not accept any service parameters")
+        raise HTTPException(
+            status_code=422, detail="Host downtime does not accept any service parameters"
+        )
 
     # Resolve host name either from upstream-style ?name= or convenience ?host=
     name = request.query_params.get("name") or host
     if not name:
-        raise HTTPException(status_code=422, detail="Host downtime requires 'name' (host) or convenience 'host'")
+        raise HTTPException(
+            status_code=422, detail="Host downtime requires 'name' (host) or convenience 'host'"
+        )
 
     start, end = _start_end_from_window(body.window)
     return await svc().schedule_downtime_host(name=name, comment=body.comment, start=start, end=end)
@@ -954,9 +1054,9 @@ async def post_downtime_host(
 )
 async def post_downtime_service(
     request: Request,
-    params: Dict[str, Any] = Depends(qparams_basic),
-    service: Optional[str] = Query(default=None, description="Equals service.name"),
-    host: Optional[str] = Query(default=None, description="Equals host.name"),
+    params: dict[str, Any] = Depends(qparams_basic),
+    service: str | None = Query(default=None, description="Equals service.name"),
+    host: str | None = Query(default=None, description="Equals host.name"),
     body: DowntimeServiceCreate = Body(
         ...,
         examples={
@@ -972,7 +1072,7 @@ async def post_downtime_service(
     ),
 ):
     # Resolve required upstream-style arguments: name=<service> and host.name=<host>
-    extra: Dict[str, Any] = {}
+    extra: dict[str, Any] = {}
     if "name" in request.query_params:
         extra["name"] = request.query_params["name"]
     elif service:
@@ -1008,17 +1108,22 @@ async def post_downtime_service(
 )
 async def get_comments(
     request: Request,
-    params: Dict[str, Any] = Depends(qparams_basic),
-    host: Optional[str] = Query(default=None, description="Equals host.name"),
-    service: Optional[str] = Query(default=None, description="Equals service.name"),
-    fields: Optional[str] = Query(default=None, description="Comma-separated dotted fields to include when summary=true"),
-    summary: Optional[bool] = Query(default=True, description="If true (default), return normalized summary projection; if false, return full upstream records"),
+    params: dict[str, Any] = Depends(qparams_basic),
+    host: str | None = Query(default=None, description="Equals host.name"),
+    service: str | None = Query(default=None, description="Equals service.name"),
+    fields: str | None = Query(
+        default=None, description="Comma-separated dotted fields to include when summary=true"
+    ),
+    summary: bool | None = Query(
+        default=True,
+        description="If true (default), return normalized summary projection; if false, return full upstream records",
+    ),
 ):
     # Accept upstream-style dotted parameters only for scoping:
     # - No params: list all comments
     # - host.name: list host comments
     # - host.name + service.name: list service comments
-    extra: Dict[str, Any] = {k: v for k, v in request.query_params.items() if "." in k}
+    extra: dict[str, Any] = {k: v for k, v in request.query_params.items() if "." in k}
     if host:
         extra["host.name"] = host
     if service:
@@ -1034,7 +1139,7 @@ async def get_comments(
         # Project a safe summary that includes 'name' and omits internal 'id'
         f = _parse_fields(fields, cfg().get_comment_summary_fields())
         norm = [_normalize_comment(r) for r in res]
-        res = _project_list(norm, f)
+        return _project_list(norm, f)
 
     return res
 
@@ -1062,7 +1167,6 @@ async def post_remove_comment(
     return await svc().remove_comment(payload)
 
 
-
 @app.post(
     "/comment/host",
     response_model=ActionResult,
@@ -1072,26 +1176,27 @@ async def post_remove_comment(
 )
 async def post_comment_host(
     request: Request,
-    params: Dict[str, Any] = Depends(qparams_basic),
-    host: Optional[str] = Query(default=None, description="Equals host.name"),
+    params: dict[str, Any] = Depends(qparams_basic),
+    host: str | None = Query(default=None, description="Equals host.name"),
     body: CommentHostCreate = Body(
         ...,
         examples={
-            "basic": {
-                "summary": "Create host comment",
-                "value": {"comment": "Planned maintenance"}
-            }
+            "basic": {"summary": "Create host comment", "value": {"comment": "Planned maintenance"}}
         },
     ),
 ):
     # Reject any service parameters
     if "service.name" in request.query_params or "service" in request.query_params:
-        raise HTTPException(status_code=422, detail="Host comment does not accept any service parameters")
+        raise HTTPException(
+            status_code=422, detail="Host comment does not accept any service parameters"
+        )
 
     # Resolve host name either from upstream-style ?name= or convenience ?host=
     name = request.query_params.get("name") or host
     if not name:
-        raise HTTPException(status_code=422, detail="Host comment requires 'name' (host) or convenience 'host'")
+        raise HTTPException(
+            status_code=422, detail="Host comment requires 'name' (host) or convenience 'host'"
+        )
 
     # Upstream target: /icingadb/host/add-comment?name=<host>
     return await svc().add_host_comment(name=name, comment=body.comment)
@@ -1106,9 +1211,9 @@ async def post_comment_host(
 )
 async def post_comment_service(
     request: Request,
-    params: Dict[str, Any] = Depends(qparams_basic),
-    service: Optional[str] = Query(default=None, description="Equals service.name"),
-    host: Optional[str] = Query(default=None, description="Equals host.name"),
+    params: dict[str, Any] = Depends(qparams_basic),
+    service: str | None = Query(default=None, description="Equals service.name"),
+    host: str | None = Query(default=None, description="Equals host.name"),
     body: CommentServiceCreate = Body(
         ...,
         examples={
@@ -1120,7 +1225,7 @@ async def post_comment_service(
     ),
 ):
     # Resolve required upstream-style arguments: name=<service> and host.name=<host>
-    extra: Dict[str, Any] = {}
+    extra: dict[str, Any] = {}
     # Accept explicit query params or convenience mapping (?service=&host=)
     if "name" in request.query_params:
         extra["name"] = request.query_params["name"]
@@ -1145,6 +1250,7 @@ async def post_comment_service(
         comment=body.comment,
     )
 
+
 @app.post(
     "/acknowledgement/host",
     response_model=ActionResult,
@@ -1154,26 +1260,28 @@ async def post_comment_service(
 )
 async def post_acknowledgement_host(
     request: Request,
-    params: Dict[str, Any] = Depends(qparams_basic),
-    host: Optional[str] = Query(default=None, description="Equals host.name"),
+    params: dict[str, Any] = Depends(qparams_basic),
+    host: str | None = Query(default=None, description="Equals host.name"),
     body: AcknowledgementHostCreate = Body(
         ...,
         examples={
-            "basic": {
-                "summary": "Acknowledge host problem",
-                "value": {"comment": "ich bin dran"}
-            }
+            "basic": {"summary": "Acknowledge host problem", "value": {"comment": "ich bin dran"}}
         },
     ),
 ):
     # Reject any service parameters
     if "service.name" in request.query_params or "service" in request.query_params:
-        raise HTTPException(status_code=422, detail="Host acknowledgement does not accept any service parameters")
+        raise HTTPException(
+            status_code=422, detail="Host acknowledgement does not accept any service parameters"
+        )
 
     # Resolve host name either from upstream-style ?name= or convenience ?host=
     name = request.query_params.get("name") or host
     if not name:
-        raise HTTPException(status_code=422, detail="Host acknowledgement requires 'name' (host) or convenience 'host'")
+        raise HTTPException(
+            status_code=422,
+            detail="Host acknowledgement requires 'name' (host) or convenience 'host'",
+        )
 
     # Upstream target: /icingadb/host/acknowledge?name=<host>
     return await svc().acknowledge_host(name=name, comment=body.comment)
@@ -1188,21 +1296,21 @@ async def post_acknowledgement_host(
 )
 async def post_acknowledgement_service(
     request: Request,
-    params: Dict[str, Any] = Depends(qparams_basic),
-    service: Optional[str] = Query(default=None, description="Equals service.name"),
-    host: Optional[str] = Query(default=None, description="Equals host.name"),
+    params: dict[str, Any] = Depends(qparams_basic),
+    service: str | None = Query(default=None, description="Equals service.name"),
+    host: str | None = Query(default=None, description="Equals host.name"),
     body: AcknowledgementServiceCreate = Body(
         ...,
         examples={
             "basic": {
                 "summary": "Acknowledge service problem",
-                "value": {"comment": "ich bin dran"}
+                "value": {"comment": "ich bin dran"},
             }
         },
     ),
 ):
     # Resolve required upstream-style arguments: name=<service> and host.name=<host>
-    extra: Dict[str, Any] = {}
+    extra: dict[str, Any] = {}
     # Accept explicit query params or convenience mapping (?service=&host=)
     if "name" in request.query_params:
         extra["name"] = request.query_params["name"]
@@ -1227,6 +1335,7 @@ async def post_acknowledgement_service(
         comment=body.comment,
     )
 
+
 @app.post(
     "/acknowledgement/host/remove",
     response_model=ActionResult,
@@ -1236,17 +1345,23 @@ async def post_acknowledgement_service(
 )
 async def post_remove_acknowledgement_host(
     request: Request,
-    params: Dict[str, Any] = Depends(qparams_basic),
-    host: Optional[str] = Query(default=None, description="Equals host.name"),
+    params: dict[str, Any] = Depends(qparams_basic),
+    host: str | None = Query(default=None, description="Equals host.name"),
 ):
     # Reject any service parameters
     if "service.name" in request.query_params or "service" in request.query_params:
-        raise HTTPException(status_code=422, detail="Host acknowledgement removal does not accept any service parameters")
+        raise HTTPException(
+            status_code=422,
+            detail="Host acknowledgement removal does not accept any service parameters",
+        )
 
     # Resolve host name either from upstream-style ?name= or convenience ?host=
     name = request.query_params.get("name") or host
     if not name:
-        raise HTTPException(status_code=422, detail="Host acknowledgement removal requires 'name' (host) or convenience 'host'")
+        raise HTTPException(
+            status_code=422,
+            detail="Host acknowledgement removal requires 'name' (host) or convenience 'host'",
+        )
 
     # Upstream target: /icingadb/host/remove-acknowledgement?name=<host>
     return await svc().remove_acknowledgement_host(name=name)
@@ -1261,12 +1376,12 @@ async def post_remove_acknowledgement_host(
 )
 async def post_remove_acknowledgement_service(
     request: Request,
-    params: Dict[str, Any] = Depends(qparams_basic),
-    service: Optional[str] = Query(default=None, description="Equals service.name"),
-    host: Optional[str] = Query(default=None, description="Equals host.name"),
+    params: dict[str, Any] = Depends(qparams_basic),
+    service: str | None = Query(default=None, description="Equals service.name"),
+    host: str | None = Query(default=None, description="Equals host.name"),
 ):
     # Resolve required upstream-style arguments: name=<service> and host.name=<host>
-    extra: Dict[str, Any] = {}
+    extra: dict[str, Any] = {}
     # Accept explicit query params or convenience mapping (?service=&host=)
     if "name" in request.query_params:
         extra["name"] = request.query_params["name"]
@@ -1300,17 +1415,21 @@ async def post_remove_acknowledgement_service(
 )
 async def post_check_now_host(
     request: Request,
-    params: Dict[str, Any] = Depends(qparams_basic),
-    host: Optional[str] = Query(default=None, description="Equals host.name"),
+    params: dict[str, Any] = Depends(qparams_basic),
+    host: str | None = Query(default=None, description="Equals host.name"),
 ):
     # Reject any service parameters
     if "service.name" in request.query_params or "service" in request.query_params:
-        raise HTTPException(status_code=422, detail="Host check-now does not accept any service parameters")
+        raise HTTPException(
+            status_code=422, detail="Host check-now does not accept any service parameters"
+        )
 
     # Resolve host name either from upstream-style ?name= or convenience ?host=
     name = request.query_params.get("name") or host
     if not name:
-        raise HTTPException(status_code=422, detail="Host check-now requires 'name' (host) or convenience 'host'")
+        raise HTTPException(
+            status_code=422, detail="Host check-now requires 'name' (host) or convenience 'host'"
+        )
 
     # Upstream target: /icingadb/host/check-now?name=<host>
     return await svc().check_now_host(name=name)
@@ -1325,13 +1444,13 @@ async def post_check_now_host(
 )
 async def post_check_now_service(
     request: Request,
-    params: Dict[str, Any] = Depends(qparams_basic),
-    service: Optional[str] = Query(default=None, description="Equals service.name"),
-    host: Optional[str] = Query(default=None, description="Equals host.name"),
+    params: dict[str, Any] = Depends(qparams_basic),
+    service: str | None = Query(default=None, description="Equals service.name"),
+    host: str | None = Query(default=None, description="Equals host.name"),
 ):
     # Resolve required upstream-style arguments: name=<service> and host.name=<host>
-    extra: Dict[str, Any] = {}
-    
+    extra: dict[str, Any] = {}
+
     # Accept explicit query params or convenience mapping (?service=&host=)
     if "name" in request.query_params:
         extra["name"] = request.query_params["name"]
@@ -1356,7 +1475,6 @@ async def post_check_now_service(
     )
 
 
-
 @app.get(
     "/history/host",
     response_model=list[Event],
@@ -1366,28 +1484,44 @@ async def post_check_now_service(
 )
 async def get_host_history(
     request: Request,
-    params: Dict[str, Any] = Depends(qparams_basic),
-    host: Optional[str] = Query(default=None, description="Equals host.name"),
-    fields: Optional[str] = Query(default=None, description="Comma-separated dotted fields to include when summary=true"),
-    summary: Optional[bool] = Query(default=True, description="If true (default), return normalized event summary; if false, return full upstream records"),
-    timerange: Timerange = Query(default="all", description="Limit events to a time window: hour, day, week, month, quarter, year, or all"),
+    params: dict[str, Any] = Depends(qparams_basic),
+    host: str | None = Query(default=None, description="Equals host.name"),
+    fields: str | None = Query(
+        default=None, description="Comma-separated dotted fields to include when summary=true"
+    ),
+    summary: bool | None = Query(
+        default=True,
+        description="If true (default), return normalized event summary; if false, return full upstream records",
+    ),
+    timerange: Timerange = Query(
+        default="all",
+        description="Limit events to a time window: hour, day, week, month, quarter, year, or all",
+    ),
 ):
     # Accept upstream-style ?name=...; also support convenience ?host=... mapped to name
     # Explicitly reject any service-related parameters for this endpoint
     if "service.name" in request.query_params:
-        raise HTTPException(status_code=422, detail="Host history does not accept 'service.name' parameter")
+        raise HTTPException(
+            status_code=422, detail="Host history does not accept 'service.name' parameter"
+        )
     if "service" in request.query_params:
-        raise HTTPException(status_code=422, detail="Host history does not accept 'service' parameter")
+        raise HTTPException(
+            status_code=422, detail="Host history does not accept 'service' parameter"
+        )
 
-    extra: Dict[str, Any] = {}
+    extra: dict[str, Any] = {}
     if "name" in request.query_params:
         extra["name"] = request.query_params["name"]
     elif host:
         extra["name"] = host
     else:
-        raise HTTPException(status_code=422, detail="Host history requires 'name' (host) or convenience 'host'")
+        raise HTTPException(
+            status_code=422, detail="Host history requires 'name' (host) or convenience 'host'"
+        )
 
-    res = await svc().list_host_history(page=params.get("page"), limit=params.get("limit"), extra=extra)
+    res = await svc().list_host_history(
+        page=params.get("page"), limit=params.get("limit"), extra=extra
+    )
 
     # Apply local time-window filtering (upstream typically returns full history)
     since = _timerange_since(timerange)
@@ -1396,8 +1530,9 @@ async def get_host_history(
     if summary is not False:
         f = _parse_fields(fields, cfg().get_host_event_summary_fields())
         flat = [_normalize_event(r, scope="host") for r in res]
-        res = _project_list(flat, f)
+        return _project_list(flat, f)
     return res
+
 
 @app.get(
     "/history/service",
@@ -1408,15 +1543,23 @@ async def get_host_history(
 )
 async def get_service_history(
     request: Request,
-    params: Dict[str, Any] = Depends(qparams_basic),
-    service: Optional[str] = Query(default=None, description="Equals service.name"),
-    host: Optional[str] = Query(default=None, description="Equals host.name"),
-    fields: Optional[str] = Query(default=None, description="Comma-separated dotted fields to include when summary=true"),
-    summary: Optional[bool] = Query(default=True, description="If true (default), return normalized event summary; if false, return full upstream records"),
-    timerange: Timerange = Query(default="all", description="Limit events to a time window: hour, day, week, month, quarter, year, or all"),
+    params: dict[str, Any] = Depends(qparams_basic),
+    service: str | None = Query(default=None, description="Equals service.name"),
+    host: str | None = Query(default=None, description="Equals host.name"),
+    fields: str | None = Query(
+        default=None, description="Comma-separated dotted fields to include when summary=true"
+    ),
+    summary: bool | None = Query(
+        default=True,
+        description="If true (default), return normalized event summary; if false, return full upstream records",
+    ),
+    timerange: Timerange = Query(
+        default="all",
+        description="Limit events to a time window: hour, day, week, month, quarter, year, or all",
+    ),
 ):
     # Only allow 'name' (service) and 'host.name' (host); both are required
-    extra: Dict[str, Any] = {}
+    extra: dict[str, Any] = {}
     # Accept direct upstream-style params or convenience mapping
     if "name" in request.query_params:
         extra["name"] = request.query_params["name"]
@@ -1428,9 +1571,14 @@ async def get_service_history(
         extra["host.name"] = host
     # Enforce required upstream parameters
     if "name" not in extra or "host.name" not in extra:
-        raise HTTPException(status_code=422, detail="Service history requires both 'name' (service) and 'host.name' (host)")
+        raise HTTPException(
+            status_code=422,
+            detail="Service history requires both 'name' (service) and 'host.name' (host)",
+        )
 
-    res = await svc().list_service_history(page=params.get("page"), limit=params.get("limit"), extra=extra)
+    res = await svc().list_service_history(
+        page=params.get("page"), limit=params.get("limit"), extra=extra
+    )
 
     # Apply local time-window filtering (upstream typically returns full history)
     since = _timerange_since(timerange)
@@ -1439,7 +1587,7 @@ async def get_service_history(
     if summary is not False:
         f = _parse_fields(fields, cfg().get_service_event_summary_fields())
         flat = [_normalize_event(r, scope="service") for r in res]
-        res = _project_list(flat, f)
+        return _project_list(flat, f)
     return res
 
 
@@ -1452,18 +1600,26 @@ async def get_service_history(
 )
 async def get_hostgroups(
     request: Request,
-    params: Dict[str, Any] = Depends(qparams_groups),
-    fields: Optional[str] = Query(default=None, description="Comma-separated dotted fields to include when summary=true (applies when listing members)"),
-    summary: Optional[bool] = Query(default=True, description="If true (default), return normalized summary for members; if false, return full upstream records"),
+    params: dict[str, Any] = Depends(qparams_groups),
+    fields: str | None = Query(
+        default=None,
+        description="Comma-separated dotted fields to include when summary=true (applies when listing members)",
+    ),
+    summary: bool | None = Query(
+        default=True,
+        description="If true (default), return normalized summary for members; if false, return full upstream records",
+    ),
 ):
     # When 'name' is provided, upstream uses the singular detail endpoint.
     # In that case, present the members as a list of hosts just like /hosts, with the same summary projection.
-    extra: Dict[str, Any] = {}
+    extra: dict[str, Any] = {}
     name = params.get("name")
     if name:
         extra["name"] = name
 
-    res = await svc().list_hostgroups(page=params.get("page"), limit=params.get("limit"), extra=extra)
+    res = await svc().list_hostgroups(
+        page=params.get("page"), limit=params.get("limit"), extra=extra
+    )
 
     if name:
         # Extract members from group detail and format like /hosts
@@ -1487,18 +1643,26 @@ async def get_hostgroups(
 )
 async def get_servicegroups(
     request: Request,
-    params: Dict[str, Any] = Depends(qparams_groups),
-    fields: Optional[str] = Query(default=None, description="Comma-separated dotted fields to include when summary=true (applies when listing members)"),
-    summary: Optional[bool] = Query(default=True, description="If true (default), return normalized summary for members; if false, return full upstream records"),
+    params: dict[str, Any] = Depends(qparams_groups),
+    fields: str | None = Query(
+        default=None,
+        description="Comma-separated dotted fields to include when summary=true (applies when listing members)",
+    ),
+    summary: bool | None = Query(
+        default=True,
+        description="If true (default), return normalized summary for members; if false, return full upstream records",
+    ),
 ):
     # When 'name' is provided, upstream uses the singular detail endpoint.
     # In that case, present the members as a list of services just like /services, with the same summary projection.
-    extra: Dict[str, Any] = {}
+    extra: dict[str, Any] = {}
     name = params.get("name")
     if name:
         extra["name"] = name
 
-    res = await svc().list_servicegroups(page=params.get("page"), limit=params.get("limit"), extra=extra)
+    res = await svc().list_servicegroups(
+        page=params.get("page"), limit=params.get("limit"), extra=extra
+    )
 
     if name:
         # Extract members from group detail and format like /services

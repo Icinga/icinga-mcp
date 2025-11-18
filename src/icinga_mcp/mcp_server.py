@@ -1,20 +1,19 @@
 from __future__ import annotations
 
-import asyncio
 import json
-from typing import Any, Dict, Optional, Literal
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
+from typing import Any, Literal
 
-from .config import load_settings
-from .http_client import IcingaWebClient
-from .services import IcingaDBService
-from .logging import setup_logging
+from mcp.server import Server
 
 # Minimal MCP stdio server using mcp library
 from mcp.server.stdio import stdio_server
-from mcp.server import Server
-from mcp.types import Tool, TextContent
+from mcp.types import TextContent
 
+from .config import load_settings
+from .http_client import IcingaWebClient
+from .logging import setup_logging
+from .services import IcingaDBService
 
 # Lightweight projection helpers to reduce payload sent to the LLM
 HOST_SUMMARY_FIELDS = [
@@ -50,6 +49,7 @@ EVENT_SUMMARY_FIELDS = [
     "output",
 ]
 
+
 def _get_in(d: Any, path: str):
     cur = d
     for p in path.split("."):
@@ -59,24 +59,29 @@ def _get_in(d: Any, path: str):
             return None
     return cur
 
-def _project_item(item: Any, fields: list[str]) -> Dict[str, Any]:
-    out: Dict[str, Any] = {}
+
+def _project_item(item: Any, fields: list[str]) -> dict[str, Any]:
+    out: dict[str, Any] = {}
     for f in fields:
         val = _get_in(item, f)
         if val is not None:
             out[f] = val
     return out
 
-def _parse_fields(fields: Optional[str], default: list[str]) -> list[str]:
+
+def _parse_fields(fields: str | None, default: list[str]) -> list[str]:
     if fields:
         return [f.strip() for f in fields.split(",") if f.strip()]
     return list(default)
 
-def _project_list(items: list[Any], fields: list[str]) -> list[Dict[str, Any]]:
+
+def _project_list(items: list[Any], fields: list[str]) -> list[dict[str, Any]]:
     return [_project_item(i, fields) for i in items]
+
 
 # Timerange helpers for history tools (LLM payload reduction)
 Timerange = Literal["hour", "day", "week", "month", "quarter", "year", "all"]
+
 
 def _parse_event_time(value: Any) -> datetime | None:
     """
@@ -87,19 +92,20 @@ def _parse_event_time(value: Any) -> datetime | None:
     if value is None:
         return None
     try:
-        if isinstance(value, (int, float)):
-            return datetime.fromtimestamp(float(value), tz=timezone.utc)
+        if isinstance(value, int | float):
+            return datetime.fromtimestamp(float(value), tz=UTC)
         if isinstance(value, str):
             s = value.strip()
             if s.endswith("Z"):
                 s = s[:-1] + "+00:00"
             dt = datetime.fromisoformat(s)
             if dt.tzinfo is None:
-                dt = dt.replace(tzinfo=timezone.utc)
-            return dt.astimezone(timezone.utc)
+                dt = dt.replace(tzinfo=UTC)
+            return dt.astimezone(UTC)
     except Exception:
         return None
     return None
+
 
 def _timerange_since(tr: Timerange | None) -> datetime | None:
     """
@@ -110,7 +116,7 @@ def _timerange_since(tr: Timerange | None) -> datetime | None:
     """
     if not tr or tr == "all":
         return None
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     if tr == "hour":
         delta = timedelta(hours=1)
     elif tr == "day":
@@ -127,6 +133,7 @@ def _timerange_since(tr: Timerange | None) -> datetime | None:
         return None
     return now - delta
 
+
 def _filter_events_by_time(items: list[Any], since: datetime | None) -> list[Any]:
     """Filter history entries by event_time (or fallback 'time') according to 'since'."""
     if since is None:
@@ -137,6 +144,7 @@ def _filter_events_by_time(items: list[Any], since: datetime | None) -> list[Any
         if t is not None and t >= since:
             out.append(it)
     return out
+
 
 async def run_stdio() -> None:
     setup_logging()
@@ -151,59 +159,65 @@ async def run_stdio() -> None:
 
     @server.tool()
     async def list_hosts(
-        filter: Optional[str] = None,
-        page: Optional[int] = None,
-        limit: Optional[int] = None,
-        fields: Optional[str] = None,
-        summary: Optional[bool] = True,
+        filter_expr: str | None = None,
+        page: int | None = None,
+        limit: int | None = None,
+        fields: str | None = None,
+        summary: bool | None = True,
     ):
-        extra = {"filter": filter} if filter else None
+        extra = {"filter": filter_expr} if filter_expr else None
         res = await service.list_hosts(page=page, limit=limit, extra=extra)
         if summary is not False:
             f = _parse_fields(fields, settings.get_host_summary_fields())
-            res = _project_list(res, f)
+            projected = _project_list(res, f)
+            return await _json(projected)
         return await _json(res)
 
     @server.tool()
     async def list_services(
-        filter: Optional[str] = None,
-        page: Optional[int] = None,
-        limit: Optional[int] = None,
-        fields: Optional[str] = None,
-        summary: Optional[bool] = True,
+        filter_expr: str | None = None,
+        page: int | None = None,
+        limit: int | None = None,
+        fields: str | None = None,
+        summary: bool | None = True,
     ):
-        extra = {"filter": filter} if filter else None
+        extra = {"filter": filter_expr} if filter_expr else None
         res = await service.list_services(page=page, limit=limit, extra=extra)
         if summary is not False:
             f = _parse_fields(fields, settings.get_service_summary_fields())
-            res = _project_list(res, f)
+            projected = _project_list(res, f)
+            return await _json(projected)
         return await _json(res)
 
     @server.tool()
-    async def list_downtimes(filter: Optional[str] = None, page: Optional[int] = None, limit: Optional[int] = None):
-        extra = {"filter": filter} if filter else None
+    async def list_downtimes(
+        filter_expr: str | None = None, page: int | None = None, limit: int | None = None
+    ):
+        extra = {"filter": filter_expr} if filter_expr else None
         res = await service.list_downtimes(page=page, limit=limit, extra=extra)
         return await _json(res)
 
     @server.tool()
-    async def list_comments(filter: Optional[str] = None, page: Optional[int] = None, limit: Optional[int] = None):
-        extra = {"filter": filter} if filter else None
+    async def list_comments(
+        filter_expr: str | None = None, page: int | None = None, limit: int | None = None
+    ):
+        extra = {"filter": filter_expr} if filter_expr else None
         res = await service.list_comments(page=page, limit=limit, extra=extra)
         return await _json(res)
 
     @server.tool()
     async def list_host_history(
         name: str,
-        filter: Optional[str] = None,
-        page: Optional[int] = None,
-        limit: Optional[int] = None,
-        fields: Optional[str] = None,
-        summary: Optional[bool] = True,
+        filter_expr: str | None = None,
+        page: int | None = None,
+        limit: int | None = None,
+        fields: str | None = None,
+        summary: bool | None = True,
         timerange: Timerange = "all",
     ):
-        extra: Dict[str, Any] = {"name": name}
-        if filter:
-            extra["filter"] = filter
+        extra: dict[str, Any] = {"name": name}
+        if filter_expr:
+            extra["filter"] = filter_expr
         res = await service.list_host_history(page=page, limit=limit, extra=extra)
 
         # Apply local time-window filtering for LLM clients
@@ -212,23 +226,24 @@ async def run_stdio() -> None:
 
         if summary is not False:
             f = _parse_fields(fields, settings.get_event_summary_fields())
-            res = _project_list(res, f)
+            projected = _project_list(res, f)
+            return await _json(projected)
         return await _json(res)
 
     @server.tool()
     async def list_service_history(
         name: str,
         host: str,
-        filter: Optional[str] = None,
-        page: Optional[int] = None,
-        limit: Optional[int] = None,
-        fields: Optional[str] = None,
-        summary: Optional[bool] = True,
+        filter_expr: str | None = None,
+        page: int | None = None,
+        limit: int | None = None,
+        fields: str | None = None,
+        summary: bool | None = True,
         timerange: Timerange = "all",
     ):
-        extra: Dict[str, Any] = {"name": name, "host.name": host}
-        if filter:
-            extra["filter"] = filter
+        extra: dict[str, Any] = {"name": name, "host.name": host}
+        if filter_expr:
+            extra["filter"] = filter_expr
         res = await service.list_service_history(page=page, limit=limit, extra=extra)
 
         # Apply local time-window filtering for LLM clients
@@ -237,16 +252,17 @@ async def run_stdio() -> None:
 
         if summary is not False:
             f = _parse_fields(fields, settings.get_event_summary_fields())
-            res = _project_list(res, f)
+            projected = _project_list(res, f)
+            return await _json(projected)
         return await _json(res)
 
     @server.tool()
     async def list_host_problems(
-        host: Optional[str] = None,
-        page: Optional[int] = None,
-        limit: Optional[int] = None,
-        fields: Optional[str] = None,
-        summary: Optional[bool] = True,
+        host: str | None = None,
+        page: int | None = None,
+        limit: int | None = None,
+        fields: str | None = None,
+        summary: bool | None = True,
     ):
         """
         List hosts with problems only.
@@ -254,24 +270,25 @@ async def run_stdio() -> None:
         - summary=true by default returns a compact projection; set summary=false for full objects.
         - fields allows overriding the summary projection with comma-separated dotted paths.
         """
-        extra: Dict[str, Any] = {}
+        extra: dict[str, Any] = {}
         if host:
             extra["host.name"] = host
         extra.setdefault("host.state.is_problem", "y")
         res = await service.list_hosts(page=page, limit=limit, extra=extra)
         if summary is not False:
             f = _parse_fields(fields, settings.get_host_summary_fields())
-            res = _project_list(res, f)
+            projected = _project_list(res, f)
+            return await _json(projected)
         return await _json(res)
 
     @server.tool()
     async def list_service_problems(
-        host: Optional[str] = None,
-        service: Optional[str] = None,
-        page: Optional[int] = None,
-        limit: Optional[int] = None,
-        fields: Optional[str] = None,
-        summary: Optional[bool] = True,
+        host: str | None = None,
+        service_name: str | None = None,
+        page: int | None = None,
+        limit: int | None = None,
+        fields: str | None = None,
+        summary: bool | None = True,
     ):
         """
         List services with problems only.
@@ -279,29 +296,30 @@ async def run_stdio() -> None:
         - summary=true by default returns a compact projection; set summary=false for full objects.
         - fields allows overriding the summary projection with comma-separated dotted paths.
         """
-        extra: Dict[str, Any] = {}
+        extra: dict[str, Any] = {}
         if host:
             extra["host.name"] = host
-        if service:
-            extra["service.name"] = service
+        if service_name:
+            extra["service.name"] = service_name
         extra.setdefault("service.state.is_problem", "y")
         res = await service.list_services(page=page, limit=limit, extra=extra)
         if summary is not False:
             f = _parse_fields(fields, settings.get_service_summary_fields())
-            res = _project_list(res, f)
+            projected = _project_list(res, f)
+            return await _json(projected)
         return await _json(res)
-    
+
     @server.tool()
     async def get_host_detail(
         name: str,
-        fields: Optional[str] = None,
-        summary: Optional[bool] = False,
+        fields: str | None = None,
+        summary: bool | None = False,
     ):
         """
         Fetch a single host by exact name. Returns full object by default.
         Use summary=true or fields="a,b,c" to reduce payload.
         """
-        extra: Dict[str, Any] = {"name": name}
+        extra: dict[str, Any] = {"name": name}
         res = await service.list_hosts(limit=1, extra=extra)
         item: Any = res[0] if res else {}
         if summary:
@@ -313,39 +331,42 @@ async def run_stdio() -> None:
     async def get_service_detail(
         name: str,
         host: str,
-        fields: Optional[str] = None,
-        summary: Optional[bool] = False,
+        fields: str | None = None,
+        summary: bool | None = False,
     ):
         """
         Fetch a single service by exact service name and host.
         Returns full object by default. Use summary=true or fields="a,b,c" to reduce payload.
         """
-        extra: Dict[str, Any] = {"host.name": host, "service.name": name}
+        extra: dict[str, Any] = {"host.name": host, "service.name": name}
         res = await service.list_services(limit=1, extra=extra)
         item: Any = res[0] if res else {}
         if summary:
             f = _parse_fields(fields, settings.get_service_summary_fields())
             item = _project_item(item, f)
         return await _json(item)
-    @server.tool()
 
-    async def list_hostgroups(name: Optional[str] = None, page: Optional[int] = None, limit: Optional[int] = None):
+    @server.tool()
+    async def list_hostgroups(
+        name: str | None = None, page: int | None = None, limit: int | None = None
+    ):
         """
         List hostgroups. Only 'name' filter is supported for exact group name.
         """
-        extra: Dict[str, Any] = {}
+        extra: dict[str, Any] = {}
         if name:
             extra["name"] = name
         res = await service.list_hostgroups(page=page, limit=limit, extra=extra or None)
         return await _json(res)
 
     @server.tool()
-
-    async def list_servicegroups(name: Optional[str] = None, page: Optional[int] = None, limit: Optional[int] = None):
+    async def list_servicegroups(
+        name: str | None = None, page: int | None = None, limit: int | None = None
+    ):
         """
         List servicegroups. Only 'name' filter is supported for exact group name.
         """
-        extra: Dict[str, Any] = {}
+        extra: dict[str, Any] = {}
         if name:
             extra["name"] = name
         res = await service.list_servicegroups(page=page, limit=limit, extra=extra or None)
@@ -354,21 +375,45 @@ async def run_stdio() -> None:
     # Actions
     @server.tool()
     async def acknowledge(payload_json: str):
-        payload = json.loads(payload_json)
-        res = await service.acknowledge(payload)
-        return await _json(res.model_dump())
+        """
+        Deprecated placeholder tool.
+
+        Generic acknowledgement via MCP is not currently implemented in the
+        service layer. Use the REST API endpoints instead:
+        - /acknowledgement/host
+        - /acknowledgement/service
+        """
+        raise NotImplementedError(
+            "Generic 'acknowledge' MCP tool is deprecated; use REST /acknowledgement/{host,service} instead."
+        )
 
     @server.tool()
     async def unacknowledge(payload_json: str):
-        payload = json.loads(payload_json)
-        res = await service.unacknowledge(payload)
-        return await _json(res.model_dump())
+        """
+        Deprecated placeholder tool.
+
+        Generic unacknowledgement via MCP is not currently implemented in the
+        service layer. Use the REST API endpoints instead:
+        - /acknowledgement/host/remove
+        - /acknowledgement/service/remove
+        """
+        raise NotImplementedError(
+            "Generic 'unacknowledge' MCP tool is deprecated; use REST /acknowledgement/{host,service}/remove instead."
+        )
 
     @server.tool()
     async def schedule_downtime(payload_json: str):
-        payload = json.loads(payload_json)
-        res = await service.schedule_downtime(payload)
-        return await _json(res.model_dump())
+        """
+        Deprecated placeholder tool.
+
+        Generic downtime scheduling via MCP is not currently implemented in the
+        service layer. Use the REST API endpoints instead:
+        - /downtime/host
+        - /downtime/service
+        """
+        raise NotImplementedError(
+            "Generic 'schedule_downtime' MCP tool is deprecated; use REST /downtime/{host,service} instead."
+        )
 
     @server.tool()
     async def remove_downtime(payload_json: str):
@@ -378,9 +423,17 @@ async def run_stdio() -> None:
 
     @server.tool()
     async def reschedule_check(payload_json: str):
-        payload = json.loads(payload_json)
-        res = await service.reschedule_check(payload)
-        return await _json(res.model_dump())
+        """
+        Deprecated placeholder tool.
+
+        Generic reschedule-check via MCP is not currently implemented in the
+        service layer. Use the REST API endpoints instead:
+        - /checknow/host
+        - /checknow/service
+        """
+        raise NotImplementedError(
+            "Generic 'reschedule_check' MCP tool is deprecated; use REST /checknow/{host,service} instead."
+        )
 
     # Comments
     @server.tool()
@@ -403,7 +456,9 @@ async def run_stdio() -> None:
         - comment: text
         - expire: 'y' or 'n'
         """
-        res = await service.add_service_comment(name=name, host_name=host, comment=comment, expire=expire.lower())
+        res = await service.add_service_comment(
+            name=name, host_name=host, comment=comment, expire=expire.lower()
+        )
         return await _json(res.model_dump())
 
     async with stdio_server() as (read_stream, write_stream):
