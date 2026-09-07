@@ -4,10 +4,7 @@ import json
 from datetime import UTC, datetime, timedelta
 from typing import Any, Literal
 
-from mcp.server import Server
-
-# Minimal MCP stdio server using mcp library
-from mcp.server.stdio import stdio_server
+from mcp.server.fastmcp import FastMCP
 from mcp.types import TextContent
 
 from .config import load_settings
@@ -152,9 +149,7 @@ async def run_stdio() -> None:
     client = IcingaWebClient(settings)
     service = IcingaDBService(client, settings)
 
-    # The mcp.server.Server type stub does not currently expose the .tool decorator,
-    # but it exists at runtime. Annotate as Any to keep mypy happy around @server.tool usage.
-    server: Any = Server("icinga-mcp")
+    server = FastMCP("icinga-mcp")
 
     async def _json(result: Any) -> list[TextContent]:
         return [TextContent(type="text", text=json.dumps(result))]
@@ -463,6 +458,4 @@ async def run_stdio() -> None:
         )
         return await _json(res.model_dump())
 
-    async with stdio_server() as (read_stream, write_stream):
-        # initialization_options is required by the type stub but is optional in practice.
-        await server.run(read_stream, write_stream, initialization_options=None)
+    await server.run_stdio_async()

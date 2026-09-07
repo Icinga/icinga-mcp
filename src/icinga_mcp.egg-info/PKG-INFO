@@ -15,7 +15,7 @@ License: SPDX-License-Identifier: GPL-2.0-only
 Classifier: License :: OSI Approved :: GNU General Public License v2 (GPLv2)
 Classifier: Programming Language :: Python :: 3
 Classifier: Programming Language :: Python :: 3.11
-Requires-Python: <3.13,>=3.11
+Requires-Python: <3.14,>=3.11
 Description-Content-Type: text/markdown
 License-File: LICENSE
 Requires-Dist: fastapi>=0.115.0

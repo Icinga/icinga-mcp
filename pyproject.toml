@@ -7,7 +7,7 @@ name = "icinga-mcp"
 version = "0.1.0"
 description = "MCP/MCPO + FastAPI bridge for Icinga Web 2 (Icinga DB Web module)"
 readme = "README.md"
-requires-python = ">=3.11,<3.13"
+requires-python = ">=3.11,<3.14"
 license = { file = "LICENSE" }
 authors = [{ name = "Bernd Erk - Icinga GmbH" }]
 classifiers = [
