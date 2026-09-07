@@ -11,6 +11,7 @@ See docs/icinga-web-api.md for endpoint mapping and behavior.
 # ruff: noqa: B008
 from __future__ import annotations
 
+import hmac
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from typing import Any, Literal, cast
@@ -523,7 +524,9 @@ async def require_auth(
 
     # Validate Authorization: Bearer <token>
     if credentials and isinstance(credentials, HTTPAuthorizationCredentials):
-        if credentials.scheme.lower() == "bearer" and credentials.credentials == bearer_secret:
+        if credentials.scheme.lower() == "bearer" and hmac.compare_digest(
+            credentials.credentials, bearer_secret
+        ):
             return
 
     # Unauthorized
